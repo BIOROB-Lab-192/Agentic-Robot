@@ -1,0 +1,12 @@
+llama-server \
+  -m models/Qwen3.5-4B-Q4_K_M.gguf \
+  --mmproj models/mmproj-F16.gguf \
+  --ctx-size 16384 \
+  --temp 0.7 \
+  --top-p 0.8 \
+  --top-k 20 \
+  --min-p 0.00 \
+  --presence_penalty 1.5 \
+  --port 8080 \
+  --jinja\
+  --chat-template-kwargs '{"enable_thinking":true}'
