@@ -21,22 +21,16 @@ class LLMinterface:
         )
 
         self.model = model
-        
+
         self.completion = None
         self.reply = None
-        self.messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant."
-            }
-        ]
+        self.messages = [{"role": "system", "content": "You are a helpful assistant."}]
 
     def get_text(self):
         self.text = input("Enter command: ")
 
     def get_image(self, image):
         self.proc_image = preprocess_image(image)
-
 
     def send_message_and_image(self):
         self.completion = self.openai_client.chat.completions.create(
@@ -58,23 +52,30 @@ class LLMinterface:
         )
 
     def send_message(self):
-        
+
+        self.messages.append({"role": "user", "content": self.text})
+
+        self.completion = self.openai_client.chat.completions.create(
+            model=self.model, messages=self.messages
+        )
+
+        self.reply = self.completion.choices[0].message.content
+
+        self.messages.append({"role": "assistant", "content": self.reply})
+
+    def add_image():
         self.messages.append({
             "role": "user",
-            "content": self.text
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{self.proc_image}"
+                    },
+                }
+            ],
         })
-        
-        self.completion = self.openai_client.chat.completions.create(
-            model=self.model,
-            messages=self.messages
-        )
-        
-        self.reply = self.completion.choices[0].message.content
-        
-        self.messages.append({
-            "role": "assistant",
-            "content": self.reply
-        })
+
 
     def print_message(self):
         print(self.completion.choices[0].message.content)

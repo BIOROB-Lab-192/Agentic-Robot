@@ -30,10 +30,10 @@ def draw_bbox(image_path, box_norm, label="Object"):
 if __name__ == "__main__":
     # Example normalized box from Qwen: [xmin, ymin, xmax, ymax]
     # This represents a box roughly in the center-left
-    my_box = [690, 615, 780, 760]
+    my_box = [514, 438, 760, 715]
     
     # Replace 'image.jpg' with your actual filename
     try:
-        draw_bbox("test_images/robot_test2.png", my_box, label="Detected Item")
+        draw_bbox("test_images/blocks.webp", my_box, label="Detected Item")
     except FileNotFoundError:
         print("Error: Please provide a valid path to an image file.")
