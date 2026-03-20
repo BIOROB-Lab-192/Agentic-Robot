@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "openai>=2.26.0",
+    "toolregistry>=0.6.0",
     "ultralytics>=8.4.23",
     "vidgear>=0.3.4",
 ]

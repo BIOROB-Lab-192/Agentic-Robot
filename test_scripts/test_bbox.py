@@ -1,39 +1,28 @@
-from PIL import Image, ImageDraw
+import cv2
 
-def draw_bbox(image_path, box_norm, label="Object"):
-    """
-    box_norm: list of [xmin, ymin, xmax, ymax] in 0-1000 scale
-    """
-    # Load the image
-    img = Image.open(image_path)
-    width, height = img.size
-    draw = ImageDraw.Draw(img)
+# Assume 'img' is your loaded image (numpy array)
+# img.shape returns (height, width, channels), e.g., (1080, 1920, 3)
 
-    # Denormalize coordinates
-    # Formula: (coordinate / 1024) * dimension
-    xmin = (box_norm[0] / 1024) * width
-    ymin = (box_norm[1] / 1024) * height
-    xmax = (box_norm[2] / 1024) * width
-    ymax = (box_norm[3] / 1024) * height
+img = cv2.imread("test_images/dog.jpg", -1)
 
-    # Draw the rectangle (outline only)
-    # Using a 5-pixel width for visibility
-    draw.rectangle([xmin, ymin, xmax, ymax], outline="red", width=5)
+height, width = img.shape[:2]
 
-    # Add a simple text label
-    draw.text((xmin, ymin - 15), label, fill="red")
+# My output: [x_min_norm, y_min_norm, x_max_norm, y_max_norm]
+box_normalized = [0.402, 0.426, 0.673, 0.715]
 
-    # Display the result
-    img.show()
-    # img.save("output_with_box.jpg") # Uncomment to save
+# Step 1: Convert normalized to pixels
+x_min_px = int(box_normalized[0] * width)
+y_min_px = int(box_normalized[1] * height)
+x_max_px = int(box_normalized[2] * width)
+y_max_px = int(box_normalized[3] * height)
 
-if __name__ == "__main__":
-    # Example normalized box from Qwen: [xmin, ymin, xmax, ymax]
-    # This represents a box roughly in the center-left
-    my_box = [514, 438, 760, 715]
-    
-    # Replace 'image.jpg' with your actual filename
-    try:
-        draw_bbox("test_images/blocks.webp", my_box, label="Detected Item")
-    except FileNotFoundError:
-        print("Error: Please provide a valid path to an image file.")
+# Step 2: Define the bounding box
+# Note: OpenCV expects [x, y, w, h] usually for drawing, or [x_min, y_min, x_max, y_max] for cv2.rectangle
+x, y, w, h = x_min_px, y_min_px, (x_max_px - x_min_px), (y_max_px - y_min_px)
+
+# Step 3: Draw it on the image to verify
+cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 3)
+
+# Optional: Crop and save the region of interest
+roi = img[y : y + h, x : x + w]
+cv2.imwrite("dog_crop.jpg", roi)

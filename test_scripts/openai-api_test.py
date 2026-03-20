@@ -14,6 +14,7 @@ def preprocess_image(image_path, max_size=(1000, 1000)):
         img.save(buffer, format="JPEG", quality=85)
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
+
 image_path = "test_images/robot_test2.png"
 base64_image = preprocess_image(image_path)
 
@@ -30,8 +31,7 @@ completion = openai_client.chat.completions.create(
         {
             "role": "user",
             "content": [
-                {"type": "text", 
-                 "text": "What is going on in this image?"},
+                {"type": "text", "text": "What is going on in this image?"},
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
