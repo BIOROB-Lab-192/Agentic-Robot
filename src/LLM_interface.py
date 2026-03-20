@@ -3,7 +3,7 @@ from io import BytesIO
 
 from openai import OpenAI
 
-import tools
+import src.tools as tools
 
 
 class LLMinterface:
@@ -52,17 +52,12 @@ class LLMinterface:
             self.messages.append(msg)
             for tool_call in msg.tool_calls:
                 args = json.loads(tool_call.function.arguments or "{}")
-                result = tools.dispatch(tool_call.function.name, args, webcam)
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": result,
-                    }
-                )
-                extra = tools.dispatch_side_effect(
-                    tool_call.function.name, args, webcam
-                )
+                result, extra = tools.dispatch(tool_call.function.name, args, webcam)
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result,
+                })
                 if extra:
                     self.messages.append(extra)
 
@@ -78,7 +73,7 @@ if __name__ == "__main__":
         model="models/Qwen3.5-4B-Q4_K_M.gguf", tools=tools.tool_json_list
     )
 
-    llm.get_text()  # prompts: "Enter command: "
+    llm.get_text() 
     llm.send_message_with_tools(cam)
     llm.print_message()
 
