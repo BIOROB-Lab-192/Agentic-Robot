@@ -60,6 +60,16 @@ class LLMinterface:
                 })
                 if extra:
                     self.messages.append(extra)
+                    
+    def prune_image_history(self):
+        """Remove image injections from history, keeping only text."""
+        self.messages = [
+            m for m in self.messages
+            if not (
+                isinstance(m.get("content"), list) and
+                any(c.get("type") == "image_url" for c in m["content"])
+            )
+        ]
 
     def print_message(self):
         print(self.completion.choices[0].message.content)
@@ -75,6 +85,7 @@ if __name__ == "__main__":
 
     llm.get_text() 
     llm.send_message_with_tools(cam)
+    llm.prune_image_history()
     llm.print_message()
 
     cam.stop_webcam()

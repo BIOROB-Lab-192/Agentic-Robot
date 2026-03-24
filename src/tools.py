@@ -1,5 +1,4 @@
 import base64
-import json
 from io import BytesIO
 
 import cv2
@@ -13,12 +12,20 @@ tool_json_list = [
             "description": "Capture a single frame from the webcam for visual analysis.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_depth_frames",
+            "description": "Capture a pair of RGB and depth frames from a depth camera for 3D visual analysis.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
 def get_webcam_frame(webcam):
-    print("capturing image)")
+    print("capturing image")
     frame = webcam.get_frame()
     frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     frame = frame.convert("RGB")
@@ -27,15 +34,44 @@ def get_webcam_frame(webcam):
     frame.save(buffer, format="JPEG", quality=85)
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
+def get_depth_frames(depthcam):
+    print("capturing depth images")
+    rgb, depth = depthcam.get_frames() 
+    
+    rgb_img = Image.fromarray(cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB))
+    rgb_buffer = BytesIO()
+    rgb_img.save(rgb_buffer, format="JPEG", quality=85)
+    rgb_b64 = base64.b64encode(rgb_buffer.getvalue()).decode("utf-8")
+    
+    depth_display = cv2.convertScaleAbs(depth, alpha=0.03)
+    depth_colormap = cv2.applyColorMap(depth_display, cv2.COLORMAP_JET)
 
-def dispatch(tool_name: str, tool_args: dict, webcam) -> tuple[str, dict | None]:
+    depth_img = Image.fromarray(cv2.cvtColor(depth_colormap, cv2.COLOR_BGR2RGB))
+    depth_buffer = BytesIO()
+    depth_img.save(depth_buffer, format="JPEG", quality=85)
+    depth_b64 = base64.b64encode(depth_buffer.getvalue()).decode("utf-8")
+    
+    return rgb_b64, depth_b64
+
+def dispatch(tool_name: str, tool_args: dict, webcam, depthcam) -> tuple[str, dict | None]:
     """Returns (tool_result_string, optional_extra_message)"""
+    print(f"Selected Tool: {tool_name}")
     if tool_name == "get_webcam_frame":
         image = get_webcam_frame(webcam)
         extra = {
             "role": "user",
-            "content": [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}"}}]
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{image}"},
+                }
+            ],
         }
         return "Webcam frame captured successfully.", extra
-    raise ValueError(f"Unknown tool: {tool_name}")
 
+    elif tool_name == "get_depth_frames":
+        rgb, depth = get_depth_frames(depthcam)
+        
+        return "Depth frames captured successfully.", extra
+
+    raise ValueError(f"Unknown tool: {tool_name}")
