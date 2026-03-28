@@ -7,7 +7,7 @@ def main():
     cam = webcam.Webcam(0, (1920,1080))
     while True:
         interface.get_text()
-        interface.send_message_with_tools(cam)
+        interface.send_message_with_tools(cam, None)
         interface.print_message()
     
 

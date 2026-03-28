@@ -35,7 +35,7 @@ class LLMinterface:
 
         self.messages.append({"role": "assistant", "content": self.reply})
 
-    def send_message_with_tools(self, webcam):
+    def send_message_with_tools(self, webcam, depthcam):
         self.messages.append({"role": "user", "content": self.text})
         while True:
             self.completion = self.openai_client.chat.completions.create(
@@ -52,7 +52,7 @@ class LLMinterface:
             self.messages.append(msg)
             for tool_call in msg.tool_calls:
                 args = json.loads(tool_call.function.arguments or "{}")
-                result, extra = tools.dispatch(tool_call.function.name, args, webcam)
+                result, extra = tools.dispatch(tool_call.function.name, args, webcam, depthcam)
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
