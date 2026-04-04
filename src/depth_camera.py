@@ -1,12 +1,15 @@
 import threading
 import time
-import numpy as np
+
 import cv2
+import numpy as np
 import pyrealsense2 as rs
 
 
 class RealSense:
-    def __init__(self, resolution=(1280, 720), fps=30, enable_depth=True, enable_rgb=True):
+    def __init__(
+        self, resolution=(1280, 720), fps=30, enable_depth=True, enable_rgb=True
+    ):
         if not enable_depth and not enable_rgb:
             raise ValueError("At least one stream must be enabled.")
 
@@ -24,9 +27,13 @@ class RealSense:
         config = rs.config()
 
         if enable_rgb:
-            config.enable_stream(rs.stream.color, resolution[0], resolution[1], rs.format.bgr8, fps)
+            config.enable_stream(
+                rs.stream.color, resolution[0], resolution[1], rs.format.bgr8, fps
+            )
         if enable_depth:
-            config.enable_stream(rs.stream.depth, resolution[0], resolution[1], rs.format.z16, fps)
+            config.enable_stream(
+                rs.stream.depth, resolution[0], resolution[1], rs.format.z16, fps
+            )
 
         self.profile = self.pipeline.start(config)
 
@@ -37,7 +44,9 @@ class RealSense:
             self.depth_scale = depth_sensor.get_depth_scale()
 
         # Only align if both streams are enabled
-        self.align = rs.align(rs.stream.color) if (enable_depth and enable_rgb) else None
+        self.align = (
+            rs.align(rs.stream.color) if (enable_depth and enable_rgb) else None
+        )
 
         self.running = True
         self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
@@ -64,7 +73,8 @@ class RealSense:
                         if depth:
                             self._depth_frame = np.asanyarray(depth.get_data())
 
-            except RuntimeError:
+            except RuntimeError as e:
+                print(e)
                 # Can happen during shutdown
                 break
 
@@ -108,7 +118,9 @@ class RealSense:
 
     def start_display(self):
         if self.display_thread is None or not self.display_thread.is_alive():
-            self.display_thread = threading.Thread(target=self._display_loop, daemon=True)
+            self.display_thread = threading.Thread(
+                target=self._display_loop, daemon=True
+            )
             self.display_thread.start()
 
     def stop(self):

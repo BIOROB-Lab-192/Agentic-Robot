@@ -11,7 +11,10 @@ name = "agentic-robot"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "numpy" },
     { name = "openai" },
+    { name = "opencv-python" },
+    { name = "pillow" },
     { name = "pyrealsense2", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "toolregistry" },
     { name = "ultralytics" },
@@ -20,7 +23,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "numpy", specifier = ">=2.4.3" },
     { name = "openai", specifier = ">=2.26.0" },
+    { name = "opencv-python", specifier = ">=4.13.0.92" },
+    { name = "pillow", specifier = ">=12.1.1" },
     { name = "pyrealsense2", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = ">=2.56.5.9235" },
     { name = "toolregistry", specifier = ">=0.6.0" },
     { name = "ultralytics", specifier = ">=8.4.23" },

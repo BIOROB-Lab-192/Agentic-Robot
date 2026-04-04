@@ -35,7 +35,7 @@ class LLMinterface:
 
         self.messages.append({"role": "assistant", "content": self.reply})
 
-    def send_message_with_tools(self, webcam):
+    def send_message_with_tools(self, webcam, depthcam):
         self.messages.append({"role": "user", "content": self.text})
         while True:
             self.completion = self.openai_client.chat.completions.create(
@@ -52,22 +52,27 @@ class LLMinterface:
             self.messages.append(msg)
             for tool_call in msg.tool_calls:
                 args = json.loads(tool_call.function.arguments or "{}")
-                result, extra = tools.dispatch(tool_call.function.name, args, webcam)
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": result,
-                })
+                result, extra = tools.dispatch(
+                    tool_call.function.name, args, webcam, depthcam
+                )
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": result,
+                    }
+                )
                 if extra:
                     self.messages.append(extra)
-                    
+
     def prune_image_history(self):
         """Remove image injections from history, keeping only text."""
         self.messages = [
-            m for m in self.messages
+            m
+            for m in self.messages
             if not (
-                isinstance(m.get("content"), list) and
-                any(c.get("type") == "image_url" for c in m["content"])
+                isinstance(m.get("content"), list)
+                and any(c.get("type") == "image_url" for c in m["content"])
             )
         ]
 
@@ -83,7 +88,7 @@ if __name__ == "__main__":
         model="models/Qwen3.5-4B-Q4_K_M.gguf", tools=tools.tool_json_list
     )
 
-    llm.get_text() 
+    llm.get_text()
     llm.send_message_with_tools(cam)
     llm.prune_image_history()
     llm.print_message()

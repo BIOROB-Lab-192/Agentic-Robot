@@ -1,4 +1,5 @@
 import base64
+import time
 from io import BytesIO
 
 import cv2
@@ -34,15 +35,22 @@ def get_webcam_frame(webcam):
     frame.save(buffer, format="JPEG", quality=85)
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
+
 def get_depth_frames(depthcam):
     print("capturing depth images")
-    rgb, depth = depthcam.get_frames() 
-    
+    for _ in range(100):
+        rgb, depth = depthcam.get_frames()
+        if rgb is not None and depth is not None:
+            break
+        time.sleep(0.01)
+    else:
+        raise RuntimeError("Timed out waiting for camera frames")
+
     rgb_img = Image.fromarray(cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB))
     rgb_buffer = BytesIO()
     rgb_img.save(rgb_buffer, format="JPEG", quality=85)
     rgb_b64 = base64.b64encode(rgb_buffer.getvalue()).decode("utf-8")
-    
+
     depth_display = cv2.convertScaleAbs(depth, alpha=0.03)
     depth_colormap = cv2.applyColorMap(depth_display, cv2.COLORMAP_JET)
 
@@ -50,10 +58,13 @@ def get_depth_frames(depthcam):
     depth_buffer = BytesIO()
     depth_img.save(depth_buffer, format="JPEG", quality=85)
     depth_b64 = base64.b64encode(depth_buffer.getvalue()).decode("utf-8")
-    
+
     return rgb_b64, depth_b64
 
-def dispatch(tool_name: str, tool_args: dict, webcam, depthcam) -> tuple[str, dict | None]:
+
+def dispatch(
+    tool_name: str, tool_args: dict, webcam, depthcam
+) -> tuple[str, dict | None]:
     """Returns (tool_result_string, optional_extra_message)"""
     print(f"Selected Tool: {tool_name}")
     if tool_name == "get_webcam_frame":
@@ -71,7 +82,20 @@ def dispatch(tool_name: str, tool_args: dict, webcam, depthcam) -> tuple[str, di
 
     elif tool_name == "get_depth_frames":
         rgb, depth = get_depth_frames(depthcam)
-        
+        extra = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{rgb}"},
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{depth}"},
+                },
+            ],
+        }
+
         return "Depth frames captured successfully.", extra
 
     raise ValueError(f"Unknown tool: {tool_name}")

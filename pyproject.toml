@@ -5,7 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "numpy>=2.4.3",
     "openai>=2.26.0",
+    "opencv-python>=4.13.0.92",
+    "pillow>=12.1.1",
     "pyrealsense2>=2.56.5.9235 ; sys_platform == 'linux' or sys_platform == 'win32'",
     "toolregistry>=0.6.0",
     "ultralytics>=8.4.23",
