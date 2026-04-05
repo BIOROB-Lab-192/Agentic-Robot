@@ -22,6 +22,7 @@ class RealSense:
         self._rgb_frame = None
         self._depth_frame = None
         self.running = False
+        self._depth_rs_frame = None
 
         self.pipeline = rs.pipeline()
         config = rs.config()
@@ -54,6 +55,23 @@ class RealSense:
 
         self.display_thread = None
 
+    def get_xyz_image(self):
+        with self._lock:
+            if self._depth_rs_frame is None:
+                return None
+            depth_frame = self._depth_rs_frame
+
+        pc = rs.pointcloud()
+        points = pc.calculate(depth_frame)
+
+        # Returns a flat list of vertices, one per pixel
+        verts = np.asanyarray(points.get_vertices())
+        h, w = depth_frame.get_height(), depth_frame.get_width()
+
+        # Reshape to image layout: [row, col, xyz]
+        xyz = verts.view(np.float32).reshape(h, w, 3)
+        return xyz.copy()
+
     def _capture_loop(self):
         while self.running:
             try:
@@ -71,6 +89,7 @@ class RealSense:
                     if self.enable_depth:
                         depth = frames.get_depth_frame()
                         if depth:
+                            self._depth_rs_frame = depth
                             self._depth_frame = np.asanyarray(depth.get_data())
 
             except RuntimeError as e:

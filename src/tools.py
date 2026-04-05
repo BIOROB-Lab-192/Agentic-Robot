@@ -59,7 +59,9 @@ def get_depth_frames(depthcam):
     depth_img.save(depth_buffer, format="JPEG", quality=85)
     depth_b64 = base64.b64encode(depth_buffer.getvalue()).decode("utf-8")
 
-    return rgb_b64, depth_b64
+    xyz = depthcam.get_xyz_image()
+
+    return rgb_b64, depth_b64, xyz
 
 
 def dispatch(
@@ -81,7 +83,7 @@ def dispatch(
         return "Webcam frame captured successfully.", extra
 
     elif tool_name == "get_depth_frames":
-        rgb, depth = get_depth_frames(depthcam)
+        rgb, depth, xyz = get_depth_frames(depthcam)
         extra = {
             "role": "user",
             "content": [
