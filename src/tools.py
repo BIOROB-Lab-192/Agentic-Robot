@@ -65,6 +65,10 @@ def get_depth_frames(depthcam):
     return rgb_b64, depth_b64, xyz
 
 
+def get_xyz_cords(depthcam, coords):
+    pass
+
+
 def dispatch(
     tool_name: str, tool_args: dict, webcam, depthcam
 ) -> tuple[str, dict | None]:
@@ -107,10 +111,6 @@ def dispatch(
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{depth}"},
-                },
-                {
-                    "type": "text",
-                    "text": json.dumps({"xyz": xyz_payload}),
                 },
             ],
         }
