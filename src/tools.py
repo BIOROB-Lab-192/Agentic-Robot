@@ -1,4 +1,5 @@
 import base64
+import json
 import time
 from io import BytesIO
 
@@ -18,7 +19,7 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "get_depth_frames",
-            "description": "Capture a pair of RGB and depth frames from a depth camera for 3D visual analysis.",
+            "description": "Capture a pair of aligned RGB and depth frames from a depth camera for 3D visual analysis. Also captures the x, y, z coordinates of pixels in the image, in meters.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -84,6 +85,18 @@ def dispatch(
 
     elif tool_name == "get_depth_frames":
         rgb, depth, xyz = get_depth_frames(depthcam)
+
+        xyz_payload = None
+        if xyz is not None:
+            xyz_small = xyz[::16, ::16, :]  # downsample
+            xyz_payload = {
+                "units": "meters",
+                "original_shape": list(xyz.shape),
+                "sampled_shape": list(xyz_small.shape),
+                "sampling_stride": 16,
+                "data": xyz_small.tolist(),
+            }
+
         extra = {
             "role": "user",
             "content": [
@@ -94,6 +107,10 @@ def dispatch(
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{depth}"},
+                },
+                {
+                    "type": "text",
+                    "text": json.dumps({"xyz": xyz_payload}),
                 },
             ],
         }
