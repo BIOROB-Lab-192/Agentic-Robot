@@ -4,6 +4,8 @@ import time
 from io import BytesIO
 
 import cv2
+import numpy as np
+import pyrealsnse2 as rs
 from PIL import Image
 
 tool_json_list = [
@@ -40,7 +42,7 @@ def get_webcam_frame(webcam):
 def get_depth_frames(depthcam):
     print("capturing depth images")
     for _ in range(100):
-        rgb, depth = depthcam.get_frames()
+        rgb, depth, depth_rs = depthcam.get_frames()
         if rgb is not None and depth is not None:
             break
         time.sleep(0.01)
@@ -62,11 +64,34 @@ def get_depth_frames(depthcam):
 
     xyz = depthcam.get_xyz_image()
 
-    return rgb_b64, depth_b64, xyz
+    return rgb_b64, depth_b64, xyz, rgb, depth, depth_rs
 
 
-def get_xyz_cords(depthcam, coords):
-    pass
+def get_xyz_cords(depthcam, coords, depth_rs):
+    if depth_rs is None:
+        return None
+
+    coords = np.asarray(coords, dtype=np.int32).reshape(-1, 2)
+
+    intrinsics = depth_rs.profile.as_video_stream_profile().intrinsics
+    h = depth_rs.get_height()
+    w = depth_rs.get_width()
+
+    out = []
+    for x, y in coords:
+        if not (0 <= x < w and 0 <= y < h):
+            out.append([np.nan, np.nan, np.nan])
+            continue
+
+        z = depth_rs.get_distance(x, y)
+        if z <= 0:
+            out.append([np.nan, np.nan, np.nan])
+            continue
+
+        xyz = rs.rs2_deproject_pixel_to_point(intrinsics, [float(x), float(y)], z)
+        out.append(xyz)
+
+    return np.asarray(out, dtype=np.float32)
 
 
 def dispatch(

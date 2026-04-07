@@ -116,11 +116,16 @@ class RealSense:
         with self._lock:
             rgb = self._rgb_frame.copy() if self._rgb_frame is not None else None
             depth = self._depth_frame.copy() if self._depth_frame is not None else None
-        return rgb, depth
+            depth_rs = (
+                self._depth_rs_frame.copy()
+                if self._depth_rs_frame is not None
+                else None
+            )
+        return rgb, depth, depth_rs
 
     def _display_loop(self):
         while self.running:
-            rgb, depth = self.get_frames()
+            rgb, depth, _ = self.get_frames()
 
             if rgb is not None:
                 cv2.imshow("RGB", rgb)
@@ -167,7 +172,7 @@ if __name__ == "__main__":
     cam.start_display()
 
     for i in range(10):
-        rgb, depth = cam.get_frames()
+        rgb, depth, depth_rs = cam.get_frames()
         if rgb is not None:
             print(f"[{i}] RGB shape: {rgb.shape}")
         if depth is not None:
