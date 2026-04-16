@@ -8,6 +8,8 @@ import numpy as np
 import pyrealsnse2 as rs
 from PIL import Image
 
+robot = "dummy robot"
+
 tool_json_list = [
     {
         "type": "function",
@@ -23,6 +25,24 @@ tool_json_list = [
             "name": "get_depth_frames",
             "description": "Capture a pair of aligned RGB and depth frames from a depth camera for 3D visual analysis. Also captures the x, y, z coordinates of pixels in the image, in meters.",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "robot_control",
+            "description": "Send a list of waypoints to the robot.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "waypoints": {
+                        "type": "array",
+                        "description": "List of waypoints for the robot to execute.",
+                        "items": {"type": "object"},
+                    }
+                },
+                "required": ["waypoints"],
+            },
         },
     },
 ]
@@ -94,6 +114,14 @@ def get_xyz_cords(depthcam, coords, depth_rs):
     return np.asarray(out, dtype=np.float32)
 
 
+def robot_control(waypoints, robot):
+    """Currently a dummy function to show proof of concept of passing along a json of waypoints to robot controller"""
+    print("Sending commands to robot")
+    print(robot)
+    print(f"Waypoints: \n {waypoints}")
+    return True
+
+
 def dispatch(
     tool_name: str, tool_args: dict, webcam, depthcam
 ) -> tuple[str, dict | None]:
@@ -113,33 +141,40 @@ def dispatch(
         return "Webcam frame captured successfully.", extra
 
     elif tool_name == "get_depth_frames":
-        rgb, depth, xyz = get_depth_frames(depthcam)
+        rgb_b64, depth_b64, xyz, rgb, depth, depth_rs = get_depth_frames(depthcam)
 
-        xyz_payload = None
-        if xyz is not None:
-            xyz_small = xyz[::16, ::16, :]  # downsample
-            xyz_payload = {
-                "units": "meters",
-                "original_shape": list(xyz.shape),
-                "sampled_shape": list(xyz_small.shape),
-                "sampling_stride": 16,
-                "data": xyz_small.tolist(),
-            }
+        # xyz_payload = None
+        # if xyz is not None:
+        #     xyz_small = xyz[::16, ::16, :]  # downsample
+        #     xyz_payload = {
+        #         "units": "meters",
+        #         "original_shape": list(xyz.shape),
+        #         "sampled_shape": list(xyz_small.shape),
+        #         "sampling_stride": 16,
+        #         "data": xyz_small.tolist(),
+        #     }
 
         extra = {
             "role": "user",
             "content": [
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{rgb}"},
+                    "image_url": {"url": f"data:image/jpeg;base64,{rgb_b64}"},
                 },
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{depth}"},
+                    "image_url": {"url": f"data:image/jpeg;base64,{depth_b64}"},
                 },
             ],
         }
 
         return "Depth frames captured successfully.", extra
+
+    elif tool_name == "robot_control":
+        waypoints = tool_args.get("waypoints", [])
+        success = robot_control(waypoints, robot)
+        return (
+            "Robot commands sent successfully." if success else "Robot control failed."
+        ), None
 
     raise ValueError(f"Unknown tool: {tool_name}")

@@ -89,7 +89,7 @@ if __name__ == "__main__":
     )
 
     llm.get_text()
-    llm.send_message_with_tools(cam)
+    llm.send_message_with_tools(cam, depthcam=None)
     llm.prune_image_history()
     llm.print_message()
 
