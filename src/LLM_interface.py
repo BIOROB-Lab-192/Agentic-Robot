@@ -18,7 +18,12 @@ class LLMinterface:
         self.completion = None
         self.reply = None
 
-        self.messages = [{"role": "system", "content": "You are a helpful assistant."}]
+        self.messages = [
+            {
+                "role": "system",
+                "content": "You control a robot arm. You have a camera and depth cam to see the workspace.",
+            }
+        ]
 
     def get_text(self):
         self.text = input("Enter command: ")

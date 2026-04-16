@@ -45,6 +45,29 @@ tool_json_list = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_xyz_coords",
+            "description": "Get the real-world XYZ coordinates (in meters) for a list of pixel coordinates from the depth camera.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "coords": {
+                        "type": "array",
+                        "description": "List of [x, y] pixel coordinates to look up.",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "minItems": 2,
+                            "maxItems": 2,
+                        },
+                    }
+                },
+                "required": ["coords"],
+            },
+        },
+    },
 ]
 
 
@@ -84,6 +107,7 @@ def get_depth_frames(depthcam):
 
     xyz = depthcam.get_xyz_image()
 
+    depthcam.last_depth_rs = depth_rs
     return rgb_b64, depth_b64, xyz, rgb, depth, depth_rs
 
 
@@ -176,5 +200,10 @@ def dispatch(
         return (
             "Robot commands sent successfully." if success else "Robot control failed."
         ), None
+
+    elif tool_name == "get_xyz_coords":
+        coords = tool_args.get("coords", [])
+        xyz = get_xyz_cords(depthcam, coords, depthcam.last_depth_rs)
+        return f"XYZ coordinates: {xyz.tolist()}", None
 
     raise ValueError(f"Unknown tool: {tool_name}")
