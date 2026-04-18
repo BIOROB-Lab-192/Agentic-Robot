@@ -23,6 +23,7 @@ class RealSense:
         self._depth_frame = None
         self.running = False
         self._depth_rs_frame = None
+        self.last_depth_rs = None
 
         self.pipeline = rs.pipeline()
         config = rs.config()

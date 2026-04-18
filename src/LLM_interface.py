@@ -21,7 +21,7 @@ class LLMinterface:
         self.messages = [
             {
                 "role": "system",
-                "content": "You control a robot arm. You have a camera and depth cam to see the workspace.",
+                "content": "You control a robot arm. You have a camera and depth cam to see the workspace. For coordinate requests, do not keep searching for a better frame. Use the current saved frame, estimate the target pixel once, call get_xyz_coords once, and then answer. If the point is invalid or depth is missing, explain that the coordinate could not be read from the saved frame.",
             }
         ]
 

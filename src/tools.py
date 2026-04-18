@@ -23,7 +23,11 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "get_depth_frames",
-            "description": "Capture a pair of aligned RGB and depth frames from a depth camera for 3D visual analysis. Also captures the x, y, z coordinates of pixels in the image, in meters.",
+            "description": (
+                "Capture ONE aligned RGB+depth frame. Call this ONLY ONCE per task, or if explicitly "
+                "asked to refresh. If a frame was already captured this session, use get_xyz_coords "
+                "directly — do NOT call this again."
+            ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -31,19 +35,20 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "robot_control",
-            "description": "Send a list of robot waypoints in real-world XYZ coordinates in meters, relative to the camera frame. Do not send image pixel coordinates.",
+            "description": "Sends waypoints in XYZ meters relative to the camera frame.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "waypoints": {
                         "type": "array",
-                        "description": "List of XYZ waypoints in meters.",
+                        "minItems": 3,
+                        "maxItems": 3,
                         "items": {
                             "type": "object",
                             "properties": {
-                                "x": {"type": "number", "description": "X in meters"},
-                                "y": {"type": "number", "description": "Y in meters"},
-                                "z": {"type": "number", "description": "Z in meters"},
+                                "x": {"type": "number"},
+                                "y": {"type": "number"},
+                                "z": {"type": "number"},
                             },
                             "required": ["x", "y", "z"],
                         },
@@ -57,7 +62,11 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "get_xyz_coords",
-            "description": "Convert image pixel coordinates [u, v] from the latest captured depth frame into real-world XYZ coordinates in meters.",
+            "description": (
+                "Convert pixel [u, v] coordinates from the ALREADY CAPTURED depth frame into XYZ meters. "
+                "Returns null xyz for out-of-bounds or zero-depth pixels. "
+                "Do not re-capture depth frames if a point returns invalid — adjust coordinates instead."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -150,7 +159,13 @@ def get_xyz_coords(depthcam, coords, depth_rs):
 
 
 def robot_control(waypoints, robot):
-    """Currently a dummy function to show proof of concept of passing along a json of waypoints to robot controller"""
+
+    for wp in waypoints:
+        if not all(k in wp for k in ("x", "y", "z")):
+            raise ValueError("Each waypoint must contain x, y, z.")
+        if any(abs(wp[k]) > 5 for k in ("x", "y", "z")):
+            raise ValueError("Waypoint values look invalid for meters.")
+
     print("Sending commands to robot")
     print(robot)
     print(f"Waypoints: \n {waypoints}")
@@ -161,6 +176,34 @@ def dispatch(
     tool_name: str, tool_args: dict, webcam, depthcam
 ) -> tuple[str, dict | None]:
     """Returns (tool_result_string, optional_extra_message)"""
+
+    # ── Hard guard: block redundant depth captures ──────────────────────────
+    if tool_name == "get_depth_frames" and depthcam.last_depth_rs is not None:
+        return (
+            "Depth frame already captured. Use get_xyz_coords with the existing frame. "
+            "Do NOT call get_depth_frames again unless explicitly told to refresh.",
+            None,
+        )
+
+    # ── get_xyz_coords: surface nan failures clearly ─────────────────────────
+    elif tool_name == "get_xyz_coords":
+        coords = tool_args.get("coords", [])
+        if depthcam.last_depth_rs is None:
+            return "ERROR: No saved depth frame. Call get_depth_frames first.", None
+
+        xyz = get_xyz_coords(depthcam, coords, depthcam.last_depth_rs)
+        points = xyz.tolist()
+
+        # Tell the agent explicitly which coords failed — don't silently return nan
+        results = []
+        for (u, v), pt in zip(coords, points):
+            if any(np.isnan(v) for v in pt):
+                results.append({"pixel": [u, v], "status": "invalid", "xyz": None})
+            else:
+                results.append({"pixel": [u, v], "status": "ok", "xyz": pt})
+
+        return json.dumps({"units": "meters", "points": results}), None
+
     print(f"Selected Tool: {tool_name}")
     if tool_name == "get_webcam_frame":
         image = get_webcam_frame(webcam)
@@ -177,17 +220,6 @@ def dispatch(
 
     elif tool_name == "get_depth_frames":
         rgb_b64, depth_b64, xyz, rgb, depth, depth_rs = get_depth_frames(depthcam)
-
-        # xyz_payload = None
-        # if xyz is not None:
-        #     xyz_small = xyz[::16, ::16, :]  # downsample
-        #     xyz_payload = {
-        #         "units": "meters",
-        #         "original_shape": list(xyz.shape),
-        #         "sampled_shape": list(xyz_small.shape),
-        #         "sampling_stride": 16,
-        #         "data": xyz_small.tolist(),
-        #     }
 
         extra = {
             "role": "user",
@@ -221,8 +253,8 @@ def dispatch(
         xyz = get_xyz_coords(depthcam, coords, depthcam.last_depth_rs)
 
         # Clear the saved frame after use
-        depthcam.last_depth_rs = None
+        # depthcam.last_depth_rs = None
 
-        return f"XYZ coordinates: {xyz.tolist()}", None
+        return json.dumps({"units": "meters", "points": xyz.tolist()}), None
 
     raise ValueError(f"Unknown tool: {tool_name}")
