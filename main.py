@@ -6,7 +6,7 @@ import src.webcam_capture as webcam
 
 def main():
     interface = llm.LLMinterface("models/Qwen3.5-4B-Q4_K_M.gguf", tools.tool_json_list)
-    cam = webcam.Webcam(0, (1920, 1080))
+    cam = webcam.Webcam(6, (1920, 1080))
     depth_cam = depthcam.RealSense()
     try:
         while True:

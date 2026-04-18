@@ -5,7 +5,7 @@ from io import BytesIO
 
 import cv2
 import numpy as np
-import pyrealsnse2 as rs
+import pyrealsense2 as rs
 from PIL import Image
 
 robot = "dummy robot"
@@ -111,7 +111,7 @@ def get_depth_frames(depthcam):
     return rgb_b64, depth_b64, xyz, rgb, depth, depth_rs
 
 
-def get_xyz_cords(depthcam, coords, depth_rs):
+def get_xyz_coords(depthcam, coords, depth_rs):
     if depth_rs is None:
         return None
 
