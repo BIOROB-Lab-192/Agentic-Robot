@@ -31,14 +31,22 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "robot_control",
-            "description": "Send a list of waypoints to the robot.",
+            "description": "Send a list of robot waypoints in real-world XYZ coordinates in meters, relative to the camera frame. Do not send image pixel coordinates.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "waypoints": {
                         "type": "array",
-                        "description": "List of waypoints for the robot to execute.",
-                        "items": {"type": "object"},
+                        "description": "List of XYZ waypoints in meters.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "x": {"type": "number", "description": "X in meters"},
+                                "y": {"type": "number", "description": "Y in meters"},
+                                "z": {"type": "number", "description": "Z in meters"},
+                            },
+                            "required": ["x", "y", "z"],
+                        },
                     }
                 },
                 "required": ["waypoints"],
@@ -49,7 +57,7 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "get_xyz_coords",
-            "description": "Get the real-world XYZ coordinates (in meters) for a list of pixel coordinates from the depth camera.",
+            "description": "Convert image pixel coordinates [u, v] from the latest captured depth frame into real-world XYZ coordinates in meters.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -86,11 +94,15 @@ def get_depth_frames(depthcam):
     print("capturing depth images")
     for _ in range(100):
         rgb, depth, depth_rs = depthcam.get_frames()
-        if rgb is not None and depth is not None:
+        if rgb is not None and depth is not None and depth_rs is not None:
             break
         time.sleep(0.01)
     else:
         raise RuntimeError("Timed out waiting for camera frames")
+
+    # Preserve the exact captured depth frame for later tool calls
+    depth_rs.keep()
+    depthcam.last_depth_rs = depth_rs
 
     rgb_img = Image.fromarray(cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB))
     rgb_buffer = BytesIO()
@@ -107,7 +119,6 @@ def get_depth_frames(depthcam):
 
     xyz = depthcam.get_xyz_image()
 
-    depthcam.last_depth_rs = depth_rs
     return rgb_b64, depth_b64, xyz, rgb, depth, depth_rs
 
 
@@ -203,7 +214,15 @@ def dispatch(
 
     elif tool_name == "get_xyz_coords":
         coords = tool_args.get("coords", [])
-        xyz = get_xyz_cords(depthcam, coords, depthcam.last_depth_rs)
+
+        if depthcam.last_depth_rs is None:
+            return "No saved depth frame available. Run get_depth_frames first.", None
+
+        xyz = get_xyz_coords(depthcam, coords, depthcam.last_depth_rs)
+
+        # Clear the saved frame after use
+        depthcam.last_depth_rs = None
+
         return f"XYZ coordinates: {xyz.tolist()}", None
 
     raise ValueError(f"Unknown tool: {tool_name}")

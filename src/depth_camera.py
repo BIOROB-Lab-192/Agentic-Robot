@@ -75,27 +75,26 @@ class RealSense:
     def _capture_loop(self):
         while self.running:
             try:
-                frames = self.pipeline.wait_for_frames()
+                frames = self.pipeline.wait_for_frames(timeout_ms=1000)
+            except Exception:
+                if not self.running:
+                    break
+                continue
 
-                if self.align is not None:
-                    frames = self.align.process(frames)
+            depth_frame = frames.get_depth_frame()
+            color_frame = frames.get_color_frame()
+            if not depth_frame or not color_frame:
+                continue
 
-                with self._lock:
-                    if self.enable_rgb:
-                        color = frames.get_color_frame()
-                        if color:
-                            self._rgb_frame = np.asanyarray(color.get_data())
+            rgb = np.asanyarray(color_frame.get_data()).copy()
+            depth = np.asanyarray(depth_frame.get_data()).copy()
 
-                    if self.enable_depth:
-                        depth = frames.get_depth_frame()
-                        if depth:
-                            self._depth_rs_frame = depth
-                            self._depth_frame = np.asanyarray(depth.get_data())
+            depth_frame.keep()
 
-            except RuntimeError as e:
-                print(e)
-                # Can happen during shutdown
-                break
+            with self._lock:
+                self._rgb_frame = rgb
+                self._depth_frame = depth
+                self._depth_rs_frame = depth_frame
 
     def get_rgb(self):
         with self._lock:
@@ -116,11 +115,7 @@ class RealSense:
         with self._lock:
             rgb = self._rgb_frame.copy() if self._rgb_frame is not None else None
             depth = self._depth_frame.copy() if self._depth_frame is not None else None
-            depth_rs = (
-                self._depth_rs_frame.copy()
-                if self._depth_rs_frame is not None
-                else None
-            )
+            depth_rs = self._depth_rs_frame
         return rgb, depth, depth_rs
 
     def _display_loop(self):
@@ -153,16 +148,29 @@ class RealSense:
 
         self.running = False
 
+        # Wait for worker threads to stop touching the pipeline
+        if self._capture_thread is not None and self._capture_thread.is_alive():
+            self._capture_thread.join(timeout=2.0)
+
+        if self.display_thread is not None and self.display_thread.is_alive():
+            self.display_thread.join(timeout=2.0)
+
+        # Release any stored frame references
+        with self._lock:
+            self._rgb_frame = None
+            self._depth_frame = None
+            self._depth_rs_frame = None
+            self.last_depth_rs = None
+
+        # Now stop and discard the pipeline
         try:
-            self.pipeline.stop()
+            if self.pipeline is not None:
+                self.pipeline.stop()
         except Exception:
             pass
 
-        if self._capture_thread.is_alive():
-            self._capture_thread.join(timeout=1.0)
-
-        if self.display_thread is not None and self.display_thread.is_alive():
-            self.display_thread.join(timeout=1.0)
+        self.pipeline = None
+        self.config = None
 
         cv2.destroyAllWindows()
 
