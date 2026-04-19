@@ -23,11 +23,9 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "get_depth_frames",
-            "description": (
-                "Capture ONE aligned RGB+depth frame. Call this ONLY ONCE per task, or if explicitly "
-                "asked to refresh. If a frame was already captured this session, use get_xyz_coords "
-                "directly — do NOT call this again."
-            ),
+            "description": "Capture ONE aligned RGB+depth frame. Call this ONLY ONCE per task, or if explicitly "
+            "asked to refresh. If a frame was already captured this session, use get_xyz_coords "
+            "directly — do NOT call this again.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -35,14 +33,15 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "robot_control",
-            "description": "Sends waypoints in XYZ meters relative to the camera frame.",
+            "description": "Sends waypoints in XYZ meters relative to the camera frame. "
+            "ALWAYS call get_xyz_coords first to obtain real coordinates — "
+            "never estimate or recall coordinates from memory.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "waypoints": {
                         "type": "array",
-                        "minItems": 3,
-                        "maxItems": 3,
+                        "minItems": 1,
                         "items": {
                             "type": "object",
                             "properties": {
@@ -176,6 +175,8 @@ def dispatch(
     tool_name: str, tool_args: dict, webcam, depthcam
 ) -> tuple[str, dict | None]:
     """Returns (tool_result_string, optional_extra_message)"""
+    print(f"[DISPATCH] tool={tool_name} args={json.dumps(tool_args, indent=2)}")
+    print(f"Selected Tool: {tool_name}")
 
     # ── Hard guard: block redundant depth captures ──────────────────────────
     if tool_name == "get_depth_frames" and depthcam.last_depth_rs is not None:
@@ -204,8 +205,7 @@ def dispatch(
 
         return json.dumps({"units": "meters", "points": results}), None
 
-    print(f"Selected Tool: {tool_name}")
-    if tool_name == "get_webcam_frame":
+    elif tool_name == "get_webcam_frame":
         image = get_webcam_frame(webcam)
         extra = {
             "role": "user",
@@ -243,18 +243,5 @@ def dispatch(
         return (
             "Robot commands sent successfully." if success else "Robot control failed."
         ), None
-
-    elif tool_name == "get_xyz_coords":
-        coords = tool_args.get("coords", [])
-
-        if depthcam.last_depth_rs is None:
-            return "No saved depth frame available. Run get_depth_frames first.", None
-
-        xyz = get_xyz_coords(depthcam, coords, depthcam.last_depth_rs)
-
-        # Clear the saved frame after use
-        # depthcam.last_depth_rs = None
-
-        return json.dumps({"units": "meters", "points": xyz.tolist()}), None
 
     raise ValueError(f"Unknown tool: {tool_name}")
