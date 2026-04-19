@@ -16,8 +16,10 @@ def main():
     except Exception as e:
         print(e)
     finally:
+        print("exiting")
         cam.stop_webcam()
         depth_cam.stop()
+        print("done")
 
 
 if __name__ == "__main__":

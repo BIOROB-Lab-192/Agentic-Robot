@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+from textwrap import dedent
 
 from openai import OpenAI
 
@@ -21,7 +22,16 @@ class LLMinterface:
         self.messages = [
             {
                 "role": "system",
-                "content": "You control a robot arm. You have a camera and depth cam to see the workspace. For coordinate requests, do not keep searching for a better frame. Use the current saved frame, estimate the target pixel once, call get_xyz_coords once, and then answer. If the point is invalid or depth is missing, explain that the coordinate could not be read from the saved frame.",
+                "content": dedent("""
+                    You are an expert robotic vision and manipulation system.
+                    Your goal is to interact with the workspace using provided cameras and tools.
+
+                    STRATEGY:
+                    1. PERCEPTION: Start by capturing a frame. Identify targets in pixel coordinates (u, v).
+                    2. VERIFICATION: Always use 'get_xyz_coords' to transform visual targets into physical waypoints. Never guess or hallucinate XYZ values.
+                    3. ERROR HANDLING: If 'get_xyz_coords' returns an 'invalid' status, it indicates a depth shadow or sensor noise. Do not loop on the same pixel. Instead, offset your target by 5-10 pixels in any direction to find a valid depth reading.
+                    4. EFFICIENCY: Use existing frames when possible, but if a target is obscured or the view is outdated, refresh the frame using the appropriate capture tool.
+                """).strip(),
             }
         ]
 

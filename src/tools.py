@@ -15,7 +15,7 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "get_webcam_frame",
-            "description": "Capture a single frame from the webcam for visual analysis.",
+            "description": "Capture a single 1920x1080 frame from the webcam for visual analysis.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -23,17 +23,45 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "get_depth_frames",
-            "description": "Captures an rgb frame from a depth camera. Pixel coordinates can be passed to get_xyz_coords to get the x, y, z distance to the pixel.",
+            "description": "Captures a 1280x720 RGB frame and aligned depth data. Use this to identify objects before calling get_xyz_coords.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
         "type": "function",
         "function": {
+            "name": "get_xyz_coords",
+            "description": (
+                "Convert pixel [u, v] coordinates (from a 1280x720 scale) into XYZ meters. "
+                "If a point returns 'invalid' (status: invalid), do not retry the same pixel. "
+                "Instead, pick a new pixel 5-10 units away to bypass depth sensor noise."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "coords": {
+                        "type": "array",
+                        "description": "List of [x, y] pixel coordinates based on 1920x1080 resolution.",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "minItems": 2,
+                            "maxItems": 2,
+                        },
+                    }
+                },
+                "required": ["coords"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "robot_control",
-            "description": "Sends waypoints in XYZ meters relative to the camera frame. "
-            "ALWAYS call get_xyz_coords first to obtain real coordinates — "
-            "never estimate or recall coordinates from memory.",
+            "description": (
+                "Sends waypoints in XYZ meters. Only use coordinates obtained via get_xyz_coords. "
+                "Never estimate coordinates or use raw pixel values here."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -52,33 +80,6 @@ tool_json_list = [
                     }
                 },
                 "required": ["waypoints"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_xyz_coords",
-            "description": (
-                "Convert pixel [u, v] coordinates from the ALREADY CAPTURED depth frame into XYZ meters. "
-                "Returns null xyz for out-of-bounds or zero-depth pixels. "
-                "Do not re-capture depth frames if a point returns invalid — adjust coordinates instead."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "coords": {
-                        "type": "array",
-                        "description": "List of [x, y] pixel coordinates to look up.",
-                        "items": {
-                            "type": "array",
-                            "items": {"type": "integer"},
-                            "minItems": 2,
-                            "maxItems": 2,
-                        },
-                    }
-                },
-                "required": ["coords"],
             },
         },
     },
@@ -125,6 +126,8 @@ def get_depth_frames(depthcam):
 
     xyz = depthcam.get_xyz_image()
 
+    depthcam.last_rgb = rgb.copy()
+
     return rgb_b64, depth_b64, xyz, rgb, depth, depth_rs
 
 
@@ -166,7 +169,14 @@ def robot_control(waypoints, robot):
     print("Sending commands to robot")
     print(robot)
     print(f"Waypoints: \n {waypoints}")
-    return True
+
+    status = f"VIRTUAL MOVE: Robot would move through {len(waypoints)} points."
+    for i, wp in enumerate(waypoints):
+        status += (
+            f"\n Point {i + 1}: X={wp['x']:.3f}m, Y={wp['y']:.3f}m, Z={wp['z']:.3f}m"
+        )
+    print(status)
+    return status
 
 
 def dispatch(
@@ -176,7 +186,6 @@ def dispatch(
     print(f"[DISPATCH] tool={tool_name} args={json.dumps(tool_args, indent=2)}")
     print(f"Selected Tool: {tool_name}")
 
-    # ── Hard guard: block redundant depth captures ──────────────────────────
     if tool_name == "get_depth_frames" and depthcam.last_depth_rs is not None:
         return (
             "Depth frame already captured. Use get_xyz_coords with the existing frame. "
@@ -184,11 +193,17 @@ def dispatch(
             None,
         )
 
-    # ── get_xyz_coords: surface nan failures clearly ─────────────────────────
     elif tool_name == "get_xyz_coords":
         coords = tool_args.get("coords", [])
         if depthcam.last_depth_rs is None:
             return "ERROR: No saved depth frame. Call get_depth_frames first.", None
+
+        if hasattr(depthcam, "last_rgb"):
+            debug_img = depthcam.last_rgb.copy()
+            for u, v in coords:
+                cv2.drawMarker(debug_img, (u, v), (0, 0, 255), cv2.MARKER_CROSS, 20, 2)
+            cv2.imwrite("last_ai_aim.jpg", debug_img)
+            print("[DEBUG] Saved AI target visualization to last_ai_aim.jpg")
 
         xyz = get_xyz_coords(depthcam, coords, depthcam.last_depth_rs)
         points = xyz.tolist()
