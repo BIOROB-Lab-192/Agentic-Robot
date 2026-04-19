@@ -40,94 +40,26 @@ class LLMinterface:
 
         self.messages.append({"role": "assistant", "content": self.reply})
 
-    def send_message_with_tools(self, webcam, depthcam, max_rounds=4):
-        # Start a fresh request
+    def send_message_with_tools(self, webcam, depthcam):
         self.messages.append({"role": "user", "content": self.text})
-
-        # Reset saved depth frame for each new user command
-        if depthcam is not None:
-            depthcam.last_depth_rs = None
-
-        tool_counts = {}
-
-        for _ in range(max_rounds):
+        while True:
             self.completion = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=self.messages,
                 tools=self.tools,
                 tool_choice="auto",
             )
-
             msg = self.completion.choices[0].message
-
-            # No tool calls -> final assistant reply
             if not msg.tool_calls:
-                self.reply = msg.content or "No answer produced."
-                self.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": self.reply,
-                    }
-                )
-                return
-
-            # Convert SDK message object to a plain dict before storing
-            assistant_msg = {
-                "role": "assistant",
-                "content": msg.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments or "{}",
-                        },
-                    }
-                    for tc in (msg.tool_calls or [])
-                ],
-            }
-            self.messages.append(assistant_msg)
-
+                self.reply = msg.content
+                self.messages.append({"role": "assistant", "content": self.reply})
+                break
+            self.messages.append(msg)
             for tool_call in msg.tool_calls:
-                name = tool_call.function.name
-                tool_counts[name] = tool_counts.get(name, 0) + 1
-
-                # Hard limits to stop loops
-                if name == "get_depth_frames" and tool_counts[name] > 1:
-                    self.messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": (
-                                "ERROR: get_depth_frames may be called only once per user request. "
-                                "Use the already captured frame."
-                            ),
-                        }
-                    )
-                    continue
-
-                if name == "get_xyz_coords" and tool_counts[name] > 1:
-                    self.messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": (
-                                "ERROR: get_xyz_coords may be called only once per user request. "
-                                "Use the returned coordinate if valid; otherwise explain that the "
-                                "coordinate could not be read from the saved frame."
-                            ),
-                        }
-                    )
-                    continue
-
-                try:
-                    args = json.loads(tool_call.function.arguments or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-
-                result, extra = tools.dispatch(name, args, webcam, depthcam)
-
+                args = json.loads(tool_call.function.arguments or "{}")
+                result, extra = tools.dispatch(
+                    tool_call.function.name, args, webcam, depthcam
+                )
                 self.messages.append(
                     {
                         "role": "tool",
@@ -135,21 +67,8 @@ class LLMinterface:
                         "content": result,
                     }
                 )
-
                 if extra:
                     self.messages.append(extra)
-
-        # Failsafe if the model keeps trying to call tools
-        self.reply = (
-            "Stopped after too many tool rounds. "
-            "Use the current result, or say the target could not be localized from the current frame."
-        )
-        self.messages.append(
-            {
-                "role": "assistant",
-                "content": self.reply,
-            }
-        )
 
     def prune_image_history(self):
         """Remove image injections from history, keeping only text."""
