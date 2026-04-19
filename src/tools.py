@@ -32,7 +32,8 @@ tool_json_list = [
         "function": {
             "name": "get_xyz_coords",
             "description": (
-                "Convert pixel [u, v] coordinates (from a 1280x720 scale) into XYZ meters. "
+                "Convert pixel [u, v] coordinates (from a 1280x720 scale) into XYZ meters."
+                "Uses standard image pixels where [0, 0] is the top left"
                 "If a point returns 'invalid' (status: invalid), do not retry the same pixel. "
                 "Instead, pick a new pixel 5-10 units away to bypass depth sensor noise."
             ),
@@ -41,7 +42,7 @@ tool_json_list = [
                 "properties": {
                     "coords": {
                         "type": "array",
-                        "description": "List of [x, y] pixel coordinates based on 1920x1080 resolution.",
+                        "description": "List of [x, y] pixel coordinates based on 1280x720 resolution.",
                         "items": {
                             "type": "array",
                             "items": {"type": "integer"},

@@ -17,8 +17,8 @@ def main():
         print(e)
     finally:
         print("exiting")
-        cam.stop_webcam()
         depth_cam.stop()
+        cam.stop_webcam()
         print("done")
 
 
