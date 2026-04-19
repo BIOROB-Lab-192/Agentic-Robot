@@ -23,9 +23,7 @@ tool_json_list = [
         "type": "function",
         "function": {
             "name": "get_depth_frames",
-            "description": "Capture ONE aligned RGB+depth frame. Call this ONLY ONCE per task, or if explicitly "
-            "asked to refresh. If a frame was already captured this session, use get_xyz_coords "
-            "directly — do NOT call this again.",
+            "description": "Captures an rgb frame from a depth camera. Pixel coordinates can be passed to get_xyz_coords to get the x, y, z distance to the pixel.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
