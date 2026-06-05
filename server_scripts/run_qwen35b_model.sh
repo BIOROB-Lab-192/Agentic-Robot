@@ -27,7 +27,7 @@ fi
 ARGS=(
   -m models/Qwen3.6-35B-A3B-UD-Q6_K.gguf
   --mmproj models/mmproj-F32.gguf
-  --ctx-size 500000
+  --ctx-size 16384
   --temp "$TEMP"
   --top-p "$TOP_P"
   --top-k "$TOP_K"
