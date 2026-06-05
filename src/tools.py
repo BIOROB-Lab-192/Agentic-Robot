@@ -10,81 +10,82 @@ from PIL import Image
 
 robot = "dummy robot"
 
-tool_json_list = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_webcam_frame",
-            "description": "Capture a single 1920x1080 frame from the webcam for visual analysis.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+def build_tools(webcam_res=(1920, 1080), depth_res=(1280, 720)):
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_webcam_frame",
+                "description": f"Capture a single {webcam_res[0]}x{webcam_res[1]} frame from the webcam for visual analysis.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_depth_frames",
-            "description": "Captures a 1280x720 RGB frame and aligned depth data. Use this to identify objects before calling get_xyz_coords.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+        {
+            "type": "function",
+            "function": {
+                "name": "get_depth_frames",
+                "description": f"Captures a {depth_res[0]}x{depth_res[1]} RGB frame and aligned depth data. Use this to identify objects before calling get_xyz_coords.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_xyz_coords",
-            "description": (
-                "Convert pixel [u, v] coordinates (from a 1280x720 scale) into XYZ meters."
-                "Uses standard image pixels where [0, 0] is the top left"
-                "If a point returns 'invalid' (status: invalid), do not retry the same pixel. "
-                "Instead, pick a new pixel 5-10 units away to bypass depth sensor noise."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "coords": {
-                        "type": "array",
-                        "description": "List of [x, y] pixel coordinates based on 1280x720 resolution.",
-                        "items": {
+        {
+            "type": "function",
+            "function": {
+                "name": "get_xyz_coords",
+                "description": (
+                    f"Convert pixel [u, v] coordinates (from a {depth_res[0]}x{depth_res[1]} scale) into XYZ meters."
+                    "Uses standard image pixels where [0, 0] is the top left"
+                    "If a point returns 'invalid' (status: invalid), do not retry the same pixel. "
+                    "Instead, pick a new pixel 5-10 units away to bypass depth sensor noise."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "coords": {
                             "type": "array",
-                            "items": {"type": "integer"},
-                            "minItems": 2,
-                            "maxItems": 2,
-                        },
-                    }
-                },
-                "required": ["coords"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "robot_control",
-            "description": (
-                "Sends waypoints in XYZ meters. Only use coordinates obtained via get_xyz_coords. "
-                "Never estimate coordinates or use raw pixel values here."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "waypoints": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "x": {"type": "number"},
-                                "y": {"type": "number"},
-                                "z": {"type": "number"},
+                            "description": f"List of [x, y] pixel coordinates based on {depth_res[0]}x{depth_res[1]} resolution.",
+                            "items": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                                "minItems": 2,
+                                "maxItems": 2,
                             },
-                            "required": ["x", "y", "z"],
-                        },
-                    }
+                        }
+                    },
+                    "required": ["coords"],
                 },
-                "required": ["waypoints"],
             },
         },
-    },
-]
+        {
+            "type": "function",
+            "function": {
+                "name": "robot_control",
+                "description": (
+                    "Sends waypoints in XYZ meters. Only use coordinates obtained via get_xyz_coords. "
+                    "Never estimate coordinates or use raw pixel values here."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "waypoints": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "x": {"type": "number"},
+                                    "y": {"type": "number"},
+                                    "z": {"type": "number"},
+                                },
+                                "required": ["x", "y", "z"],
+                            },
+                        }
+                    },
+                    "required": ["waypoints"],
+                },
+            },
+        },
+    ]
 
 
 def get_webcam_frame(webcam):

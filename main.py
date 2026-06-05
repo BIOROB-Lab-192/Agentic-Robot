@@ -3,11 +3,13 @@ import src.LLM_interface as llm
 import src.tools as tools
 import src.webcam_capture as webcam
 
+webcam_res = (1920, 1080)
+depth_res = (1280, 720)
 
 def main():
-    interface = llm.LLMinterface("models/Qwen3.5-4B-Q4_K_M.gguf", tools.tool_json_list)
-    cam = webcam.Webcam(6, (1920, 1080))
-    depth_cam = depthcam.RealSense()
+    interface = llm.LLMinterface("models/Qwen3.5-4B-Q4_K_M.gguf", tools.build_tools(webcam_res, depth_res))
+    cam = webcam.Webcam(6, webcam_res)
+    depth_cam = depthcam.RealSense(depth_res)
     try:
         while True:
             interface.get_text()

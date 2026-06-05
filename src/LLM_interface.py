@@ -94,7 +94,7 @@ if __name__ == "__main__":
 
     cam = Webcam(0, (1920, 1080))
     llm = LLMinterface(
-        model="models/Qwen3.5-4B-Q4_K_M.gguf", tools=tools.tool_json_list
+        model="models/Qwen3.5-4B-Q4_K_M.gguf", tools=tools.build_tools()
     )
 
     llm.get_text()
