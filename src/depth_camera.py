@@ -82,6 +82,9 @@ class RealSense:
                     break
                 continue
 
+            if self.align:
+                frames = self.align.process(frames)
+
             depth_frame = frames.get_depth_frame()
             color_frame = frames.get_color_frame()
             if not depth_frame or not color_frame:
