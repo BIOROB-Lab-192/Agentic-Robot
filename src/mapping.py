@@ -444,10 +444,10 @@ def run_interactive_calibration(
                 f"{cam_xyz[2]:.3f}) m"
             )
 
-            # Save a debug image with the marker outline
+            # Save a debug image with the marker centre marked
             debug = rgb.copy()
-            cv2.aruco.drawDetectedMarkers(debug, [corners])
             cv2.circle(debug, (u, v), 5, (0, 0, 255), -1)
+            cv2.circle(debug, (u, v), 25, (0, 255, 0), 2)
             cv2.imwrite(str(out / f"pose_{i + 1:02d}.jpg"), debug)
 
         if len(camera_pts) < 3:
