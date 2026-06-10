@@ -359,6 +359,7 @@ def run_interactive_calibration(
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     save_path = str(out / "calibration.json")
+    log_path = out / "captures.csv"
 
     # Start the camera
     pipeline = rs.pipeline()
@@ -438,11 +439,27 @@ def run_interactive_calibration(
             camera_pts.append(cam_xyz)
             robot_pts.append(np.array([rx, ry, rz], dtype=np.float64))
 
+            # Log to console
             print(f"  ✓ Captured:  pixel=({u}, {v})")
+            print(f"  Robot : ({rx:8.4f}, {ry:8.4f}, {rz:8.4f}) m")
             print(
-                f"               camera=({cam_xyz[0]:.3f}, {cam_xyz[1]:.3f}, "
-                f"{cam_xyz[2]:.3f}) m"
+                f"  Camera: ({cam_xyz[0]:8.4f}, {cam_xyz[1]:8.4f}, {cam_xyz[2]:8.4f}) m"
             )
+            d = np.linalg.norm(cam_xyz - np.array([rx, ry, rz])) * 1000
+            print(f"  Raw Δ : {d:6.0f} mm  (robot - camera, before calibration)")
+
+            # Append to CSV log
+            with open(log_path, "a") as f:
+                if i == 0:
+                    f.write(
+                        "pose,robot_x,robot_y,robot_z,camera_x,camera_y,camera_z,pixel_u,pixel_v\n"
+                    )
+                f.write(
+                    f"{i + 1},"
+                    f"{rx:.6f},{ry:.6f},{rz:.6f},"
+                    f"{cam_xyz[0]:.6f},{cam_xyz[1]:.6f},{cam_xyz[2]:.6f},"
+                    f"{u},{v}\n"
+                )
 
             # Save a debug image with the marker centre marked
             debug = rgb.copy()
@@ -505,10 +522,10 @@ if __name__ == "__main__":
     else:
         # Example poses — operator edits these before running
         poses = [
-            (0.20, 0.15, 0.00),
-            (0.40, -0.10, 0.00),
-            (0.10, -0.30, 0.05),
-            (0.35, 0.25, 0.10),
-            (0.25, 0.00, 0.15),
+            (290 / 1000, -10 / 1000, 600 / 1000),
+            (290 / 1000, 240 / 1000, 650 / 1000),
+            (-160 / 1000, 125 / 1000, 750 / 1000),
+            (100 / 1000, 315 / 1000, 500 / 1000),
+            (160 / 1000, 330 / 1000, 400 / 1000),
         ]
         run_interactive_calibration(poses, output_dir="calibration_out")
