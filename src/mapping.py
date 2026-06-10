@@ -306,40 +306,41 @@ def validate_correspondences(
 def find_best_subset(
     camera_pts: np.ndarray,
     robot_pts: np.ndarray,
-    min_inliers: int = 3,
-    inlier_threshold_mm: float = 40.0,
+    inlier_threshold_mm: float = 25.0,
 ) -> tuple[list[int], list[int]]:
-    """Find the best consistent subset of poses via RANSAC.
+    """Find the most self-consistent subset of poses.
 
-    Enumerates every 3-pose combination, solves R,T, then checks how many
-    of the remaining poses fit within *inlier_threshold_mm*.  Returns the
-    largest inlier set.
+    Enumerates every 3-pose combination, solves R,T, then scores each
+    subset by how many of the remaining poses fit within
+    *inlier_threshold_mm* (tie-broken by lowest RMS).  Returns the
+    largest / tightest inlier set.
 
     Parameters
     ----------
     camera_pts : (N, 3)
     robot_pts  : (N, 3)
-    min_inliers : minimum poses to form a valid solution (default 3).
     inlier_threshold_mm : max error for a pose to be considered an inlier.
 
     Returns
     -------
-    (inlier_indices, outlier_indices) — 0-based.  If no combination
-    meets *min_inliers*, returns (all, []).
+    (inlier_indices, outlier_indices) — 0-based.  If every subset scores
+    0 inliers, returns the subset with the lowest RMS error (and marks
+    the worst-fitting pose as the sole outlier, if N > 3).
     """
     from itertools import combinations
 
     n = len(camera_pts)
     best_inliers: list[int] = list(range(n))
     best_outliers: list[int] = []
-    best_score = (0, 0.0)  # (inlier_count, negative_max_err)
+    best_score = (-1, 0.0)  # (inlier_count, -RMS_mm) — higher is better
 
     for combo in combinations(range(n), 3):
-        c_a = camera_pts[list(combo)]
-        r_a = robot_pts[list(combo)]
+        idx = list(combo)
+        c_a = camera_pts[idx]
+        r_a = robot_pts[idx]
 
         try:
-            R, T, _ = kabsch(c_a, r_a)
+            R, T, rms = kabsch(c_a, r_a)
         except (np.linalg.LinAlgError, AssertionError):
             continue
 
@@ -351,16 +352,47 @@ def find_best_subset(
 
         inliers = [k for k, e in enumerate(errors) if e < inlier_threshold_mm]
         outliers = [k for k, e in enumerate(errors) if e >= inlier_threshold_mm]
-        max_err = max(errors) if errors else 0.0
-        score = (len(inliers), -max_err)
+        score = (len(inliers), -rms * 1000)  # higher inlier count + lower RMS
 
         if score > best_score:
             best_score = score
             best_inliers = inliers
             best_outliers = outliers
 
-    if len(best_inliers) < min_inliers:
-        return list(range(n)), []
+    # If no subset has ≥3 inliers, fall back: return the tightest 3-combo
+    # and mark the single worst overall pose as outlier.
+    if len(best_inliers) < 3:
+        # Try again scoring purely by lowest RMS
+        best_rms = float("inf")
+        best_combo = None
+        best_all_errors = None
+        for combo in combinations(range(n), 3):
+            idx = list(combo)
+            try:
+                R, T, rms = kabsch(camera_pts[idx], robot_pts[idx])
+            except (np.linalg.LinAlgError, AssertionError):
+                continue
+            errors = [
+                np.linalg.norm(R @ camera_pts[k] + T - robot_pts[k]) * 1000
+                for k in range(n)
+            ]
+            total_rms = float(np.sqrt(np.mean(np.array(errors) ** 2)))
+            if total_rms < best_rms:
+                best_rms = total_rms
+                best_combo = idx
+                best_all_errors = errors
+
+        if best_combo and best_all_errors:
+            best_inliers = list(range(n))
+            # Kick out the single worst pose if N > 3
+            if n > 3:
+                worst = int(np.argmax(best_all_errors))
+                best_inliers = [k for k in range(n) if k != worst]
+                best_outliers = [worst]
+            else:
+                best_outliers = []
+        else:
+            return list(range(n)), []
 
     return sorted(best_inliers), sorted(best_outliers)
 
