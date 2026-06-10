@@ -196,6 +196,176 @@ def kabsch(P: np.ndarray, Q: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]
 
 
 # ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
+
+def _pairwise_distance_check(
+    camera_pts: np.ndarray, robot_pts: np.ndarray, tolerance_mm: float = 30.0
+) -> list[tuple[int, int, float]]:
+    """Compare the distance between every pair of points in both frames.
+
+    Rigid transforms preserve distances, so for correctly matched points the
+    camera-frame and robot-frame pairwise distances must agree within noise.
+
+    Returns a list of (i, j, diff_mm) for pairs that exceed *tolerance_mm*.
+    """
+    n = len(camera_pts)
+    bad_pairs: list[tuple[int, int, float]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            d_cam = np.linalg.norm(camera_pts[i] - camera_pts[j]) * 1000
+            d_rob = np.linalg.norm(robot_pts[i] - robot_pts[j]) * 1000
+            diff = abs(d_cam - d_rob)
+            if diff > tolerance_mm:
+                bad_pairs.append((i, j, diff))
+    return bad_pairs
+
+
+def _leave_one_out_errors(
+    camera_pts: np.ndarray, robot_pts: np.ndarray
+) -> list[tuple[int, float]]:
+    """For each pose, solve without it and measure how far its prediction is.
+
+    Returns a sorted list of (pose_index, error_mm), worst-first.
+    A single large error points to a likely bad measurement.
+    """
+    n = len(camera_pts)
+    errors: list[tuple[int, float]] = []
+    for k in range(n):
+        mask = [i for i in range(n) if i != k]
+        R_k, T_k, _ = kabsch(camera_pts[mask], robot_pts[mask])
+        pred = R_k @ camera_pts[k] + T_k
+        err = np.linalg.norm(pred - robot_pts[k]) * 1000
+        errors.append((k, err))
+    errors.sort(key=lambda x: -x[1])  # worst first
+    return errors
+
+
+def validate_correspondences(
+    camera_pts: np.ndarray,
+    robot_pts: np.ndarray,
+    distance_tolerance_mm: float = 30.0,
+    outlier_threshold_mm: float = 50.0,
+) -> list[int]:
+    """Run pairwise and leave-one-out checks, report results.
+
+    Parameters
+    ----------
+    camera_pts : (N, 3) array from the depth camera.
+    robot_pts  : (N, 3) array from the robot controller.
+    distance_tolerance_mm : max acceptable pairwise distance mismatch.
+    outlier_threshold_mm : LOO error above this flags a pose as suspect.
+
+    Returns
+    -------
+    Sorted list of suspect pose indices (worst first).  Empty if all clean.
+    """
+    print("\n  ── Running validation ──")
+
+    # 1. Pairwise distance check
+    bad = _pairwise_distance_check(camera_pts, robot_pts, distance_tolerance_mm)
+    if bad:
+        print(f"\n  ⚠  {len(bad)} pair(s) have mismatched distances:")
+        suspect_count = {i: 0 for i in range(len(camera_pts))}
+        for i, j, diff in bad:
+            suspect_count[i] += 1
+            suspect_count[j] += 1
+            print(f"     Pose {i + 1} ↔ Pose {j + 1}:  Δ = {diff:.0f} mm")
+    else:
+        print("\n  ✓ All pairwise distances match (within tolerance).")
+        suspect_count = {i: 0 for i in range(len(camera_pts))}
+
+    # 2. Leave-one-out
+    loo = _leave_one_out_errors(camera_pts, robot_pts)
+    print(f"\n  Leave-one-out errors (worst first):")
+    for idx, err in loo:
+        flag = " ⚠" if err > outlier_threshold_mm else ""
+        print(f"     Pose {idx + 1}:  {err:.0f} mm{flag}")
+
+    # 3. Identify suspects
+    suspects = []
+    for idx, err in loo:
+        score = suspect_count.get(idx, 0) + (1 if err > outlier_threshold_mm else 0)
+        if score >= 1:
+            suspects.append((idx, score, err))
+    suspects.sort(key=lambda x: -x[1])  # worst first
+
+    if suspects:
+        print(f"\n  ⚠  Suspect poses (likely bad readings):")
+        for idx, score, err in suspects:
+            print(
+                f"     Pose {idx + 1}:  mismatch score={score}, LOO error={err:.0f} mm"
+            )
+    else:
+        print("\n  ✓ All poses look consistent.")
+
+    return [s[0] for s in suspects]
+
+
+def find_best_subset(
+    camera_pts: np.ndarray,
+    robot_pts: np.ndarray,
+    min_inliers: int = 3,
+    inlier_threshold_mm: float = 40.0,
+) -> tuple[list[int], list[int]]:
+    """Find the best consistent subset of poses via RANSAC.
+
+    Enumerates every 3-pose combination, solves R,T, then checks how many
+    of the remaining poses fit within *inlier_threshold_mm*.  Returns the
+    largest inlier set.
+
+    Parameters
+    ----------
+    camera_pts : (N, 3)
+    robot_pts  : (N, 3)
+    min_inliers : minimum poses to form a valid solution (default 3).
+    inlier_threshold_mm : max error for a pose to be considered an inlier.
+
+    Returns
+    -------
+    (inlier_indices, outlier_indices) — 0-based.  If no combination
+    meets *min_inliers*, returns (all, []).
+    """
+    from itertools import combinations
+
+    n = len(camera_pts)
+    best_inliers: list[int] = list(range(n))
+    best_outliers: list[int] = []
+    best_score = (0, 0.0)  # (inlier_count, negative_max_err)
+
+    for combo in combinations(range(n), 3):
+        c_a = camera_pts[list(combo)]
+        r_a = robot_pts[list(combo)]
+
+        try:
+            R, T, _ = kabsch(c_a, r_a)
+        except (np.linalg.LinAlgError, AssertionError):
+            continue
+
+        errors = []
+        for k in range(n):
+            pred = R @ camera_pts[k] + T
+            err = np.linalg.norm(pred - robot_pts[k]) * 1000
+            errors.append(err)
+
+        inliers = [k for k, e in enumerate(errors) if e < inlier_threshold_mm]
+        outliers = [k for k, e in enumerate(errors) if e >= inlier_threshold_mm]
+        max_err = max(errors) if errors else 0.0
+        score = (len(inliers), -max_err)
+
+        if score > best_score:
+            best_score = score
+            best_inliers = inliers
+            best_outliers = outliers
+
+    if len(best_inliers) < min_inliers:
+        return list(range(n)), []
+
+    return sorted(best_inliers), sorted(best_outliers)
+
+
+# ---------------------------------------------------------------------------
 # Calibration class
 # ---------------------------------------------------------------------------
 
@@ -472,8 +642,122 @@ def run_interactive_calibration(
                 f"Only {len(camera_pts)} valid captures — need at least 3."
             )
 
+        # --- Validation ---
+        ca = np.array(camera_pts)
+        ro = np.array(robot_pts)
+
+        # Auto-select the best consistent subset
+        inliers, outliers = find_best_subset(ca, ro)
+
         print(f"\n{'=' * 60}")
-        print(f"  Collected {len(camera_pts)} / {len(robot_poses)} poses — solving...")
+        print(f"  Collected {len(camera_pts)} / {len(robot_poses)} poses")
+        print(f"  Best subset: {len(inliers)} inlier(s), {len(outliers)} outlier(s)")
+
+        if outliers:
+            print(f"\n  Outlier poses (excluded):")
+            for idx in outliers:
+                rx, ry, rz = robot_poses[idx]
+                R, T, _ = kabsch(ca[inliers], ro[inliers])
+                pred = R @ ca[idx] + T
+                err = np.linalg.norm(pred - ro[idx]) * 1000
+                print(
+                    f"     Pose {idx + 1}:  target=({rx:.3f}, {ry:.3f}, {rz:.3f})  "
+                    f"error={err:.0f} mm"
+                )
+
+            # Offer to re-capture outliers or accept subset
+            print(
+                f"\n  You can re-capture {len(outliers)} outlier pose(s), "
+                f"or press Enter to solve with the {len(inliers)} good poses."
+            )
+            choice = input(
+                "  Enter a pose number to re-capture, or Enter to accept subset: "
+            ).strip()
+            if not choice:
+                # Drop outliers and keep going
+                camera_pts = [camera_pts[i] for i in inliers]
+                robot_pts = [robot_pts[i] for i in inliers]
+            else:
+                try:
+                    redo = int(choice) - 1
+                except ValueError:
+                    redo = -1
+                if redo < 0 or redo >= len(robot_poses):
+                    camera_pts = [camera_pts[i] for i in inliers]
+                    robot_pts = [robot_pts[i] for i in inliers]
+                else:
+                    # Re-capture one pose
+                    rx, ry, rz = robot_poses[redo]
+                    print(
+                        f"\n  Re-capturing Pose {redo + 1}:  ({rx:.3f}, {ry:.3f}, {rz:.3f})"
+                    )
+                    input(
+                        "  Move the robot to this position → Press Enter to capture: "
+                    )
+
+                    rgb = None
+                    depth_rs = None
+                    for _ in range(60):
+                        frames = pipeline.wait_for_frames()
+                        frames = align.process(frames)
+                        color_frame = frames.get_color_frame()
+                        depth_rs = frames.get_depth_frame()
+                        if color_frame and depth_rs:
+                            rgb = np.asanyarray(color_frame.get_data()).copy()
+                            break
+
+                    if rgb is None or depth_rs is None:
+                        print("  ✗ Failed to get frames. Using best subset.")
+                        camera_pts = [camera_pts[i] for i in inliers]
+                        robot_pts = [robot_pts[i] for i in inliers]
+                    else:
+                        corners = detect_marker_corners(rgb, marker_id=marker_id)
+                        if corners is None:
+                            print(
+                                f"  ✗ Marker {marker_id} not detected. Using best subset."
+                            )
+                            camera_pts = [camera_pts[i] for i in inliers]
+                            robot_pts = [robot_pts[i] for i in inliers]
+                        else:
+                            u, v = marker_center_pixel(corners)
+                            cam_xyz = camera_xyz_at_pixel(u, v, depth_rs, intrinsics)
+                            if cam_xyz is None:
+                                print("  ✗ Invalid depth. Using best subset.")
+                                camera_pts = [camera_pts[i] for i in inliers]
+                                robot_pts = [robot_pts[i] for i in inliers]
+                            else:
+                                camera_pts[redo] = cam_xyz
+                                robot_pts[redo] = np.array(
+                                    [rx, ry, rz], dtype=np.float64
+                                )
+                                print(f"  ✓ Re-captured:  pixel=({u}, {v})")
+                                print(
+                                    f"     Camera: ({cam_xyz[0]:8.4f}, {cam_xyz[1]:8.4f}, {cam_xyz[2]:8.4f}) m"
+                                )
+
+                                # Update CSV
+                                rows = []
+                                with open(log_path) as f:
+                                    rows = f.readlines()
+                                rows[redo + 1] = (
+                                    f"{redo + 1},"
+                                    f"{rx:.6f},{ry:.6f},{rz:.6f},"
+                                    f"{cam_xyz[0]:.6f},{cam_xyz[1]:.6f},{cam_xyz[2]:.6f},"
+                                    f"{u},{v}\n"
+                                )
+                                with open(log_path, "w") as f:
+                                    f.writelines(rows)
+
+                                # Overwrite debug image
+                                debug = rgb.copy()
+                                cv2.circle(debug, (u, v), 5, (0, 0, 255), -1)
+                                cv2.circle(debug, (u, v), 25, (0, 255, 0), 2)
+                                cv2.imwrite(
+                                    str(out / f"pose_{redo + 1:02d}.jpg"), debug
+                                )
+
+        print(f"\n{'=' * 60}")
+        print(f"  Solving with {len(camera_pts)} poses...")
 
         cal.calibrate(np.array(camera_pts), np.array(robot_pts))
         cal.save(save_path)
@@ -523,9 +807,9 @@ if __name__ == "__main__":
         # Example poses — operator edits these before running
         poses = [
             (290 / 1000, -10 / 1000, 600 / 1000),
-            (290 / 1000, 240 / 1000, 650 / 1000),
             (-160 / 1000, 125 / 1000, 750 / 1000),
             (100 / 1000, 315 / 1000, 500 / 1000),
+            (290 / 1000, 240 / 1000, 650 / 1000),
             (160 / 1000, 330 / 1000, 400 / 1000),
         ]
         run_interactive_calibration(poses, output_dir="calibration_out")
