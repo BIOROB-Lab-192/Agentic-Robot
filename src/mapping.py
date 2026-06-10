@@ -359,7 +359,6 @@ def run_interactive_calibration(
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     save_path = str(out / "calibration.json")
-    log_path = out / "calibration.log"
 
     # Start the camera
     pipeline = rs.pipeline()
@@ -409,6 +408,8 @@ def run_interactive_calibration(
             input("  Move the robot to this position → Press Enter to capture: ")
 
             # Grab a frame
+            rgb = None
+            depth_rs = None
             for _ in range(60):
                 frames = pipeline.wait_for_frames()
                 frames = align.process(frames)
