@@ -522,6 +522,7 @@ def run_interactive_calibration(
     depth_resolution: tuple[int, int] = (1280, 720),
     fps: int = 30,
     output_dir: str = "calibration_out",
+    num_captures: int = 10,
 ) -> Calibration:
     """Walk the operator through N manual robot positions.
 
@@ -547,6 +548,8 @@ def run_interactive_calibration(
         Frame rate for the RealSense streams.
     output_dir : str
         Folder where all calibration artifacts are written.
+    num_captures : int
+        Number of frames to capture per pose (median-averaged).
 
     Returns
     -------
@@ -610,39 +613,67 @@ def run_interactive_calibration(
             # Wait for the operator to position the robot and press Enter
             input("  Move the robot to this position → Press Enter to capture: ")
 
-            # Grab a frame
-            rgb = None
-            depth_rs = None
-            for _ in range(60):
-                frames = pipeline.wait_for_frames()
-                frames = align.process(frames)
-                color_frame = frames.get_color_frame()
-                depth_rs = frames.get_depth_frame()
-                if color_frame and depth_rs:
-                    rgb = np.asanyarray(color_frame.get_data()).copy()
-                    break
+            # Capture multiple frames and median-average the camera XYZ
+            samples: list[np.ndarray] = []
+            best_rgb: np.ndarray | None = None
+            best_u: int = 0
+            best_v: int = 0
 
-            if rgb is None or depth_rs is None:
-                print("  ✗ Failed to get camera frames. Skipping.")
+            for n in range(num_captures):
+                rgb = None
+                depth_rs = None
+                for _ in range(60):
+                    frames = pipeline.wait_for_frames()
+                    frames = align.process(frames)
+                    color_frame = frames.get_color_frame()
+                    depth_rs = frames.get_depth_frame()
+                    if color_frame and depth_rs:
+                        rgb = np.asanyarray(color_frame.get_data()).copy()
+                        break
+
+                if rgb is None or depth_rs is None:
+                    continue
+
+                corners = detect_marker_corners(rgb, marker_id=marker_id)
+                if corners is None:
+                    continue
+
+                u, v = marker_center_pixel(corners)
+                cam_xyz = camera_xyz_at_pixel(u, v, depth_rs, intrinsics)
+                if cam_xyz is None:
+                    continue
+
+                samples.append(cam_xyz)
+                if best_rgb is None:
+                    best_rgb = rgb
+                    best_u, best_v = u, v
+
+                print(f"    {n + 1}/{num_captures}", end="\r")
+
+            if len(samples) == 0:
+                print("  ✗ No valid frames captured. Skipping.")
                 continue
 
-            # Detect marker
-            corners = detect_marker_corners(rgb, marker_id=marker_id)
-            if corners is None:
-                print(f"  ✗ Marker {marker_id} not detected. Skipping.")
-                continue
+            if len(samples) < num_captures:
+                print(f"  ⚠ Only {len(samples)}/{num_captures} frames valid.")
+            else:
+                print(f"  ✓ Captured {len(samples)} frames." + " " * 20)
 
-            u, v = marker_center_pixel(corners)
-            cam_xyz = camera_xyz_at_pixel(u, v, depth_rs, intrinsics)
-            if cam_xyz is None:
-                print(f"  ✗ Invalid depth at centre pixel ({u}, {v}). Skipping.")
-                continue
+            # Median across frames per axis (robust to outliers)
+            cam_xyz = np.median(np.array(samples), axis=0)
+            centroid_std = np.std(np.array(samples), axis=0) * 1000
+            print(
+                f"    Camera (median): ({cam_xyz[0]:.4f}, {cam_xyz[1]:.4f}, {cam_xyz[2]:.4f}) m"
+            )
+            print(
+                f"    Per-axis std:     ({centroid_std[0]:.1f}, {centroid_std[1]:.1f}, {centroid_std[2]:.1f}) mm"
+            )
 
             camera_pts.append(cam_xyz)
             robot_pts.append(np.array([rx, ry, rz], dtype=np.float64))
 
             # Log to console
-            print(f"  ✓ Captured:  pixel=({u}, {v})")
+            print(f"  ✓ Captured:  pixel=({best_u}, {best_v})")
             print(f"  Robot : ({rx:8.4f}, {ry:8.4f}, {rz:8.4f}) m")
             print(
                 f"  Camera: ({cam_xyz[0]:8.4f}, {cam_xyz[1]:8.4f}, {cam_xyz[2]:8.4f}) m"
@@ -660,14 +691,15 @@ def run_interactive_calibration(
                     f"{i + 1},"
                     f"{rx:.6f},{ry:.6f},{rz:.6f},"
                     f"{cam_xyz[0]:.6f},{cam_xyz[1]:.6f},{cam_xyz[2]:.6f},"
-                    f"{u},{v}\n"
+                    f"{best_u},{best_v}\n"
                 )
 
             # Save a debug image with the marker centre marked
-            debug = rgb.copy()
-            cv2.circle(debug, (u, v), 5, (0, 0, 255), -1)
-            cv2.circle(debug, (u, v), 25, (0, 255, 0), 2)
-            cv2.imwrite(str(out / f"pose_{i + 1:02d}.jpg"), debug)
+            if best_rgb is not None:
+                debug = best_rgb.copy()
+                cv2.circle(debug, (best_u, best_v), 5, (0, 0, 255), -1)
+                cv2.circle(debug, (best_u, best_v), 25, (0, 255, 0), 2)
+                cv2.imwrite(str(out / f"pose_{i + 1:02d}.jpg"), debug)
 
         if len(camera_pts) < 3:
             raise RuntimeError(
@@ -843,5 +875,6 @@ if __name__ == "__main__":
             (100 / 1000, 315 / 1000, 500 / 1000),
             (290 / 1000, 240 / 1000, 650 / 1000),
             (160 / 1000, 330 / 1000, 400 / 1000),
+            (150 / 1000, -100 / 1000, 550 / 1000),
         ]
         run_interactive_calibration(poses, output_dir="calibration_out")
