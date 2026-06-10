@@ -61,7 +61,8 @@ def detect_marker_corners(
     if params is None:
         params = default_aruco_params()
 
-    corners, ids, _ = cv2.aruco.detectMarkers(rgb, dictionary, parameters=params)
+    detector = cv2.aruco.ArucoDetector(dictionary, params)
+    corners, ids, _ = detector.detectMarkers(rgb)
     if ids is None or marker_id not in ids.flatten():
         return None
 
