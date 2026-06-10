@@ -11,3 +11,6 @@ wheels/
 
 models/
 mobileclip2_b.ts
+
+# Calibration outputs
+calibration_out/

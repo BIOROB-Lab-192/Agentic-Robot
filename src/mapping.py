@@ -318,7 +318,7 @@ def run_interactive_calibration(
     marker_size_m: float = 0.04,
     depth_resolution: tuple[int, int] = (1280, 720),
     fps: int = 30,
-    save_path: str = "calibration.json",
+    output_dir: str = "calibration_out",
 ) -> Calibration:
     """Walk the operator through N manual robot positions.
 
@@ -326,6 +326,9 @@ def run_interactive_calibration(
     the end-effector is visible in the workspace.  Pressing Enter captures
     the camera-frame XYZ of the marker.  After all N poses are captured the
     transform is solved and saved.
+
+    All outputs (calibration.json, per-pose debug images, and a log file)
+    are written to *output_dir*, which is created if it doesn't exist.
 
     Parameters
     ----------
@@ -339,15 +342,23 @@ def run_interactive_calibration(
         (width, height) for the RealSense streams.
     fps : int
         Frame rate for the RealSense streams.
-    save_path : str
-        Where to write the final calibration JSON.
+    output_dir : str
+        Folder where all calibration artifacts are written.
 
     Returns
     -------
     Calibration instance.
     """
+    from pathlib import Path
+
     if rs is None:
         raise RuntimeError("pyrealsense2 is not installed — cannot capture frames.")
+
+    # Prepare output directory
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    save_path = str(out / "calibration.json")
+    log_path = out / "calibration.log"
 
     # Start the camera
     pipeline = rs.pipeline()
@@ -435,7 +446,7 @@ def run_interactive_calibration(
             debug = rgb.copy()
             cv2.aruco.drawDetectedMarkers(debug, [corners])
             cv2.circle(debug, (u, v), 5, (0, 0, 255), -1)
-            cv2.imwrite(f"calibration_pose_{i + 1}.jpg", debug)
+            cv2.imwrite(str(out / f"pose_{i + 1:02d}.jpg"), debug)
 
         if len(camera_pts) < 3:
             raise RuntimeError(
@@ -498,4 +509,4 @@ if __name__ == "__main__":
             (0.35, 0.25, 0.10),
             (0.25, 0.00, 0.15),
         ]
-        run_interactive_calibration(poses)
+        run_interactive_calibration(poses, output_dir="calibration_out")
