@@ -27,7 +27,7 @@ except ImportError:
 
 def default_aruco_dict() -> cv2.aruco.Dictionary:
     """Return a pre-defined ArUco dictionary suitable for calibration."""
-    return cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
+    return cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_1000)
 
 
 def default_aruco_params() -> cv2.aruco.DetectorParameters:
@@ -46,7 +46,7 @@ def detect_marker_corners(
     Parameters
     ----------
     rgb : (H, W, 3) BGR uint8 image.
-    dictionary : ArUco dictionary to use (defaults to DICT_6X6_250).
+    dictionary : ArUco dictionary to use (defaults to DICT_4X4_1000).
     params : detector parameters (defaults to sensible defaults).
     marker_id : the specific marker ID we're looking for.
 
@@ -444,7 +444,7 @@ def run_interactive_calibration(
                 f"{cam_xyz[2]:.3f}) m"
             )
 
-            # Show a debug image with the marker outline
+            # Save a debug image with the marker outline
             debug = rgb.copy()
             cv2.aruco.drawDetectedMarkers(debug, [corners])
             cv2.circle(debug, (u, v), 5, (0, 0, 255), -1)
