@@ -2,13 +2,32 @@ import base64
 import json
 import time
 from io import BytesIO
+from typing import Optional
 
 import cv2
 import numpy as np
 import pyrealsense2 as rs
 from PIL import Image
 
+from src.mapping import Calibration
+
 robot = "dummy robot"
+_calibration: Optional[Calibration] = None
+
+
+def load_calibration(path: str) -> None:
+    """Load a calibration file produced by mapping.py.
+
+    Once loaded, every call to get_xyz_coords will automatically transform
+    camera-frame coordinates into robot-base coordinates before returning.
+    """
+    global _calibration
+    _calibration = Calibration.load(path)
+    print(
+        f"[tools] Loaded calibration from {path}  "
+        f"(RMS: {_calibration.rms_error * 1000:.1f} mm)"
+    )
+
 
 def build_tools(webcam_res=(1920, 1080), depth_res=(1280, 720)):
     return [
@@ -208,6 +227,11 @@ def dispatch(
             print("[DEBUG] Saved AI target visualization to last_ai_aim.jpg")
 
         xyz = get_xyz_coords(depthcam, coords, depthcam.last_depth_rs)
+
+        # Transform camera → robot if calibration is loaded
+        if _calibration is not None:
+            xyz = _calibration.camera_to_robot(xyz)
+
         points = xyz.tolist()
 
         # Tell the agent explicitly which coords failed — don't silently return nan

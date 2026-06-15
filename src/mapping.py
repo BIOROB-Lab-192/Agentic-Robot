@@ -718,7 +718,7 @@ def run_interactive_calibration(
         print(f"  Best subset: {len(inliers)} inlier(s), {len(outliers)} outlier(s)")
 
         if outliers:
-            print(f"\n  Outlier poses (excluded):")
+            print("\n  Outlier poses (excluded):")
             for idx in outliers:
                 rx, ry, rz = robot_poses[idx]
                 R, T, _ = kabsch(ca[inliers], ro[inliers])
