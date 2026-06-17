@@ -35,7 +35,7 @@ def default_aruco_params() -> cv2.aruco.DetectorParameters:
     """Return tuned detector parameters for sub-pixel corner accuracy."""
     p = cv2.aruco.DetectorParameters()
     p.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-    p.cornerRefinementWinSize = 5
+    p.cornerRefinementWinSize = 7
     p.cornerRefinementMaxIterations = 50
     p.cornerRefinementMinAccuracy = 0.01
     p.adaptiveThreshWinSizeMin = 3
@@ -560,6 +560,25 @@ class Calibration:
 # ---------------------------------------------------------------------------
 
 
+def _lock_color_sensor(profile) -> None:
+    """Disable auto-exposure and auto-white-balance on the color sensor.
+
+    Per-frame brightness drift from auto-exposure shifts ArUco corner
+    positions slightly.  Locking both eliminates that noise source.
+    Gracefully no-ops on sensors that don't expose the option.
+    """
+    sensor = profile.get_device().first_color_sensor()
+    for option, value in (
+        (rs.option.enable_auto_exposure, 0),
+        (rs.option.enable_auto_white_balance, 0),
+    ):
+        try:
+            if sensor.supports(option):
+                sensor.set_option(option, value)
+        except Exception:
+            pass
+
+
 def run_interactive_calibration(
     robot_poses: list[tuple[float, float, float]],
     marker_id: int = 0,
@@ -620,6 +639,7 @@ def run_interactive_calibration(
     config.enable_stream(rs.stream.color, w, h, rs.format.bgr8, fps)
 
     profile = pipeline.start(config)
+    _lock_color_sensor(profile)
 
     color_profile = profile.get_stream(rs.stream.color).as_video_stream_profile()
     intrinsics = color_profile.get_intrinsics()
@@ -1013,12 +1033,20 @@ if __name__ == "__main__":
     else:
         # Example poses — operator edits these before running
         poses = [
+            # Central cluster (6 poses)
             (290 / 1000, -10 / 1000, 600 / 1000),
             (-160 / 1000, 125 / 1000, 750 / 1000),
             (100 / 1000, 315 / 1000, 500 / 1000),
             (290 / 1000, 240 / 1000, 650 / 1000),
             (160 / 1000, 330 / 1000, 400 / 1000),
             (150 / 1000, -100 / 1000, 550 / 1000),
+            # Workspace extents (4 poses) — tune these to your rig's reach.
+            # Z was the tightest axis in the cluster above, so two are
+            # placed at the Z extremes; the other two push the X range.
+            (200 / 1000, 100 / 1000, 850 / 1000),  # high Z
+            (200 / 1000, 100 / 1000, 300 / 1000),  # low Z
+            (400 / 1000, 100 / 1000, 575 / 1000),  # far X+
+            (-250 / 1000, 100 / 1000, 575 / 1000),  # far X-
         ]
         run_interactive_calibration(
             poses, marker_size_m=0.03, output_dir="calibration_out"
