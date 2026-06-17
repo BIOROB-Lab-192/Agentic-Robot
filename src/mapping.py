@@ -933,13 +933,24 @@ def run_interactive_calibration(
             f"\n  Cross-pose rvec consistency (no-rotation gripper, "
             f"all poses should agree):"
         )
+        rvec_outliers: list[int] = []
         if len(rv) > 0:
             median_rv = np.median(rv, axis=0)
             dev_deg = np.linalg.norm(rv - median_rv, axis=1) * (180.0 / np.pi)
             for k, d in enumerate(dev_deg):
                 flag = " ⚠" if d > 2.0 else ""
                 print(f"     Pose {k + 1}:  {d:.2f}°{flag}")
+                if d > 2.0:
+                    rvec_outliers.append(k)
         validate_correspondences(ca, ro, rvecs=rv)
+
+        if rvec_outliers:
+            outliers = sorted(set(outliers) | set(rvec_outliers))
+            inliers = sorted(set(range(len(camera_pts))) - set(outliers))
+            print(
+                f"\n  ⚠  Excluding {len(rvec_outliers)} pose(s) on rvec grounds: "
+                f"{[i + 1 for i in rvec_outliers]}"
+            )
 
         print(f"\n{'=' * 60}")
         print(f"  Collected {len(camera_pts)} / {len(robot_poses)} poses")
