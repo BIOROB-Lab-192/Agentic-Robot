@@ -1,13 +1,14 @@
 """
 Self-contained calibration module.  No dependencies on other project
-modules — only needs ``cv2``, ``numpy``, and optionally ``pyrealsense2``
-for the live camera capture.
+modules — only needs ``cv2``, ``numpy``, and ``pyrealsense2`` for the
+live camera capture.
 
 Parts:
-  1. ArUco marker detection  (RGB → pixel → camera-frame XYZ)
-  2. Kabsch SVD solver       (find R, T from corresponding 3D pairs)
-  3. Calibration class        (store, apply, save/load the transform)
-  4. Interactive routine      (robot moves → auto-capture → solve)
+  1. ArUco marker detection  (RGB → 4 corner pixels)
+  2. 6-DoF pose recovery     (corners + marker size → rvec, tvec)
+  3. Kabsch SVD solver       (find R, T from corresponding 3D pairs)
+  4. Calibration class        (store, apply, save/load the transform)
+  5. Interactive routine      (robot moves → auto-capture → solve)
 """
 
 from __future__ import annotations
@@ -97,73 +98,6 @@ def marker_center_pixel(corners: np.ndarray) -> tuple[int, int]:
     return u, v
 
 
-def camera_xyz_at_pixel(
-    u: int,
-    v: int,
-    depth_frame: rs.depth_frame,
-    intrinsics: rs.intrinsics,
-    patch_radius: int = 3,
-) -> np.ndarray | None:
-    """Deproject pixel (u, v) to camera-frame (X, Y, Z) in metres.
-
-    If the exact centre pixel has invalid depth (0 or negative), the function
-    samples a small (2*radius+1)-sized patch around it and takes the median
-    valid depth.  This handles the common case where the marker centre lands
-    on a depth hole or edge.
-
-    Returns a (3,) float32 array, or *None* if no valid depth is found.
-    """
-    h, w = depth_frame.get_height(), depth_frame.get_width()
-
-    def _depth_at(px, py) -> float:
-        if 0 <= px < w and 0 <= py < h:
-            return depth_frame.get_distance(px, py)
-        return 0.0
-
-    z = _depth_at(u, v)
-    if z > 0:
-        xyz = rs.rs2_deproject_pixel_to_point(intrinsics, [float(u), float(v)], z)
-        return np.asarray(xyz, dtype=np.float32)
-
-    # Fallback: sample a patch and take the median valid depth
-    depths = []
-    for du in range(-patch_radius, patch_radius + 1):
-        for dv in range(-patch_radius, patch_radius + 1):
-            d = _depth_at(u + du, v + dv)
-            if d > 0:
-                depths.append(d)
-    if not depths:
-        return None
-
-    z_med = float(np.median(depths))
-    xyz = rs.rs2_deproject_pixel_to_point(intrinsics, [float(u), float(v)], z_med)
-    return np.asarray(xyz, dtype=np.float32)
-
-
-def detect_marker_camera_xyz(
-    rgb: np.ndarray,
-    depth_frame: rs.depth_frame,
-    intrinsics: rs.intrinsics,
-    marker_id: int = 0,
-) -> tuple[tuple[int, int], np.ndarray] | None:
-    """High-level helper: detect *marker_id* in *rgb*, return its centre
-    pixel and camera-frame (X, Y, Z).
-
-    Returns ((u, v), camera_xyz) on success, or *None* if the marker
-    wasn't found or the depth was invalid.
-    """
-    corners = detect_marker_corners(rgb, marker_id=marker_id)
-    if corners is None:
-        return None
-
-    u, v = marker_center_pixel(corners)
-    cam_xyz = camera_xyz_at_pixel(u, v, depth_frame, intrinsics)
-    if cam_xyz is None:
-        return None
-
-    return (u, v), cam_xyz
-
-
 # ---------------------------------------------------------------------------
 # 6-DoF marker pose recovery (calibration-time helpers)
 # ---------------------------------------------------------------------------
@@ -229,29 +163,6 @@ def marker_pose_from_corners(
     proj, _ = cv2.projectPoints(obj, rvec, tvec, K, D)
     err = float(np.linalg.norm(proj.reshape(4, 2) - corners, axis=1).max())
     return rvec, tvec, err
-
-
-def detect_marker_pose(
-    rgb: np.ndarray,
-    K: np.ndarray,
-    D: np.ndarray,
-    marker_id: int = 0,
-    marker_size_m: float = 0.03,
-    max_reproj_err_px: float = 0.6,
-) -> tuple[np.ndarray, np.ndarray] | None:
-    """High-level helper: detect *marker_id* in *rgb* and return its (rvec, tvec).
-
-    Returns *None* if the marker isn't found, or if the reprojection error
-    exceeds *max_reproj_err_px* (indicating a likely occluded / clipped
-    detection).
-    """
-    corners = detect_marker_corners(rgb, marker_id=marker_id)
-    if corners is None:
-        return None
-    rvec, tvec, err = marker_pose_from_corners(corners, marker_size_m, K, D)
-    if err > max_reproj_err_px:
-        return None
-    return rvec, tvec
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +351,6 @@ def validate_correspondences(
 def find_best_subset(
     camera_pts: np.ndarray,
     robot_pts: np.ndarray,
-    rvecs: np.ndarray | None = None,
     inlier_threshold_mm: float = 25.0,
 ) -> tuple[list[int], list[int]]:
     """Find the most self-consistent subset of poses.
@@ -454,10 +364,6 @@ def find_best_subset(
     ----------
     camera_pts : (N, 3)
     robot_pts  : (N, 3)
-    rvecs : (N, 3) per-pose marker rvecs, accepted for API symmetry with
-        :func:`validate_correspondences`.  Not used in the combinatorial
-        scoring — the cross-pose orientation consistency check lives in
-        :func:`validate_correspondences`.
     inlier_threshold_mm : max error for a pose to be considered an inlier.
 
     Returns
@@ -658,7 +564,7 @@ def run_interactive_calibration(
     robot_poses: list[tuple[float, float, float]],
     marker_id: int = 0,
     marker_size_m: float = 0.03,
-    depth_resolution: tuple[int, int] = (1280, 720),
+    color_resolution: tuple[int, int] = (1280, 720),
     fps: int = 30,
     output_dir: str = "calibration_out",
     num_captures: int = 30,
@@ -667,7 +573,8 @@ def run_interactive_calibration(
 
     For each position the operator moves the robot so the ArUco marker on
     the end-effector is visible in the workspace.  Pressing Enter captures
-    the camera-frame XYZ of the marker.  After all N poses are captured the
+    the marker's 6-DoF pose in the camera frame (recovered via solvePnP on
+    the RGB image, no depth required).  After all N poses are captured the
     transform is solved and saved.
 
     All outputs (calibration.json, per-pose debug images, and a log file)
@@ -682,10 +589,10 @@ def run_interactive_calibration(
     marker_size_m : float
         Physical side length of the marker, in metres.  Black-edge to
         black-edge.  Must match OpenCV's ``markerLength`` convention.
-    depth_resolution : (int, int)
-        (width, height) for the RealSense streams.
+    color_resolution : (int, int)
+        (width, height) for the RealSense color stream.
     fps : int
-        Frame rate for the RealSense streams.
+        Frame rate for the color stream.
     output_dir : str
         Folder where all calibration artifacts are written.
     num_captures : int
@@ -702,27 +609,20 @@ def run_interactive_calibration(
     if rs is None:
         raise RuntimeError("pyrealsense2 is not installed — cannot capture frames.")
 
-    # Prepare output directory
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     save_path = str(out / "calibration.json")
     log_path = out / "captures.csv"
 
-    # Start the camera
     pipeline = rs.pipeline()
     config = rs.config()
-    w, h = depth_resolution
-    config.enable_stream(rs.stream.depth, w, h, rs.format.z16, fps)
+    w, h = color_resolution
     config.enable_stream(rs.stream.color, w, h, rs.format.bgr8, fps)
 
     profile = pipeline.start(config)
 
-    # Align depth to colour so pixels correspond
-    align = rs.align(rs.stream.color)
-
-    # Get depth intrinsics (needed for deprojection)
-    depth_profile = profile.get_stream(rs.stream.depth).as_video_stream_profile()
-    intrinsics = depth_profile.get_intrinsics()
+    color_profile = profile.get_stream(rs.stream.color).as_video_stream_profile()
+    intrinsics = color_profile.get_intrinsics()
     K, D = intrinsics_to_KD(intrinsics)
 
     cal = Calibration()
@@ -757,30 +657,25 @@ def run_interactive_calibration(
             # Wait for the operator to position the robot and press Enter
             input("  Move the robot to this position → Press Enter to capture: ")
 
-            # Capture num_captures frames; per frame, recover 6-DoF pose via
-            # solvePnP (estimatePoseSingleMarkers) and depth-xyz via the
-            # centre pixel + depth (old method, kept for delta diagnostics).
+            # Capture num_captures frames; per frame, recover 6-DoF pose
+            # via solvePnP (cv2.SOLVEPNP_IPPE_SQUARE) on the RGB image.
             rvec_samples: list[np.ndarray] = []
             tvec_samples: list[np.ndarray] = []
             reproj_errs: list[float] = []
-            depth_samples: list[np.ndarray] = []
             best_rgb: np.ndarray | None = None
             best_corners: np.ndarray | None = None
             best_reproj: float = float("inf")
 
             for n in range(num_captures):
                 rgb = None
-                depth_rs = None
                 for _ in range(60):
                     frames = pipeline.wait_for_frames()
-                    frames = align.process(frames)
                     color_frame = frames.get_color_frame()
-                    depth_rs = frames.get_depth_frame()
-                    if color_frame and depth_rs:
+                    if color_frame:
                         rgb = np.asanyarray(color_frame.get_data()).copy()
                         break
 
-                if rgb is None or depth_rs is None:
+                if rgb is None:
                     continue
 
                 corners = detect_marker_corners(rgb, marker_id=marker_id)
@@ -793,14 +688,9 @@ def run_interactive_calibration(
                 if err > 0.6:
                     continue
 
-                u, v = marker_center_pixel(corners)
-                depth_xyz = camera_xyz_at_pixel(u, v, depth_rs, intrinsics)
-
                 rvec_samples.append(rvec)
                 tvec_samples.append(tvec)
                 reproj_errs.append(err)
-                if depth_xyz is not None:
-                    depth_samples.append(depth_xyz)
 
                 if err < best_reproj:
                     best_reproj = err
@@ -843,11 +733,6 @@ def run_interactive_calibration(
 
             tvec_med = np.median(tvecs_arr[keep], axis=0)
             rvec_med = np.median(rvecs_arr[keep], axis=0)
-            depth_med = (
-                np.median(np.array(depth_samples), axis=0)
-                if depth_samples
-                else np.array([np.nan, np.nan, np.nan])
-            )
             reproj_med = float(np.median(np.array(reproj_errs)[keep]))
 
             tvec_std_mm = np.std(tvecs_arr[keep], axis=0) * 1000
@@ -872,12 +757,6 @@ def run_interactive_calibration(
             robot_pts.append(np.array([rx, ry, rz], dtype=np.float64))
             rvecs.append(rvec_med.astype(np.float64))
 
-            delta = tvec_med - depth_med
-            print(f"    depth (median): ({depth_med[0]:+.4f}, {depth_med[1]:+.4f}, {depth_med[2]:+.4f}) m")
-            print(
-                f"    delta (tvec - depth): ({delta[0]*1000:+.1f}, {delta[1]*1000:+.1f}, {delta[2]*1000:+.1f}) mm"
-            )
-
             best_u, best_v = (
                 marker_center_pixel(best_corners) if best_corners is not None else (0, 0)
             )
@@ -886,8 +765,6 @@ def run_interactive_calibration(
                 csv_header = (
                     "pose,robot_x,robot_y,robot_z,"
                     "tvec_x,tvec_y,tvec_z,rvec_x,rvec_y,rvec_z,reproj_err_px,"
-                    "depth_x,depth_y,depth_z,"
-                    "delta_x,delta_y,delta_z,"
                     "accepted,"
                     "u0,v0,u1,v1,u2,v2,u3,v3\n"
                 )
@@ -905,8 +782,6 @@ def run_interactive_calibration(
                     f"{tvec_med[0]:.6f},{tvec_med[1]:.6f},{tvec_med[2]:.6f},"
                     f"{rvec_med[0]:.6f},{rvec_med[1]:.6f},{rvec_med[2]:.6f},"
                     f"{reproj_med:.4f},"
-                    f"{depth_med[0]:.6f},{depth_med[1]:.6f},{depth_med[2]:.6f},"
-                    f"{delta[0]:.6f},{delta[1]:.6f},{delta[2]:.6f},"
                     f"{n_accepted},"
                     + ",".join(c_flat)
                     + "\n"
@@ -933,7 +808,7 @@ def run_interactive_calibration(
         ro = np.array(robot_pts)
         rv = np.array(rvecs)
 
-        inliers, outliers = find_best_subset(ca, ro, rvecs=rv)
+        inliers, outliers = find_best_subset(ca, ro)
         print(
             f"\n  Cross-pose rvec consistency (no-rotation gripper, "
             f"all poses should agree):"
@@ -1013,17 +888,14 @@ def run_interactive_calibration(
                     )
 
                     rgb = None
-                    depth_rs = None
                     for _ in range(60):
                         frames = pipeline.wait_for_frames()
-                        frames = align.process(frames)
                         color_frame = frames.get_color_frame()
-                        depth_rs = frames.get_depth_frame()
-                        if color_frame and depth_rs:
+                        if color_frame:
                             rgb = np.asanyarray(color_frame.get_data()).copy()
                             break
 
-                    if rgb is None or depth_rs is None:
+                    if rgb is None:
                         print("  ✗ Failed to get frames. Using best subset.")
                         camera_pts = [camera_pts[i] for i in inliers]
                         robot_pts = [robot_pts[i] for i in inliers]
@@ -1041,15 +913,10 @@ def run_interactive_calibration(
                             rvec_new, tvec_new, err_new = marker_pose_from_corners(
                                 corners, marker_size_m, K, D
                             )
-                            u, v = marker_center_pixel(corners)
-                            depth_new = camera_xyz_at_pixel(
-                                u, v, depth_rs, intrinsics
-                            )
-                            if depth_new is None or err_new > 0.6:
+                            if err_new > 0.6:
                                 print(
                                     f"  ✗ Bad re-capture "
-                                    f"(depth={depth_new is not None}, "
-                                    f"reproj={err_new:.3f} px). Using best subset."
+                                    f"(reproj={err_new:.3f} px). Using best subset."
                                 )
                                 camera_pts = [camera_pts[i] for i in inliers]
                                 robot_pts = [robot_pts[i] for i in inliers]
@@ -1061,14 +928,13 @@ def run_interactive_calibration(
                                 )
                                 rvecs[redo] = rvec_new.astype(np.float64)
                                 print(
-                                    f"  ✓ Re-captured:  pixel=({u}, {v})  "
-                                    f"reproj={err_new:.3f} px"
+                                    f"  ✓ Re-captured:  reproj={err_new:.3f} px"
                                 )
                                 print(
                                     f"     tvec : ({tvec_new[0]:+.4f}, {tvec_new[1]:+.4f}, {tvec_new[2]:+.4f}) m"
                                 )
 
-                                delta_new = tvec_new - depth_new
+                                u, v = marker_center_pixel(corners)
                                 c_flat = [f"{c[0]:.2f},{c[1]:.2f}" for c in corners]
                                 with open(log_path) as f:
                                     rows = f.readlines()
@@ -1078,8 +944,6 @@ def run_interactive_calibration(
                                     f"{tvec_new[0]:.6f},{tvec_new[1]:.6f},{tvec_new[2]:.6f},"
                                     f"{rvec_new[0]:.6f},{rvec_new[1]:.6f},{rvec_new[2]:.6f},"
                                     f"{err_new:.4f},"
-                                    f"{depth_new[0]:.6f},{depth_new[1]:.6f},{depth_new[2]:.6f},"
-                                    f"{delta_new[0]:.6f},{delta_new[1]:.6f},{delta_new[2]:.6f},"
                                     f"1,"
                                     + ",".join(c_flat)
                                     + "\n"
