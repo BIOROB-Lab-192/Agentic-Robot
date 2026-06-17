@@ -1,7 +1,9 @@
 import base64
 import json
+import math
 import time
 from io import BytesIO
+from pathlib import Path
 from typing import Optional
 
 import cv2
@@ -15,18 +17,33 @@ robot = "dummy robot"
 _calibration: Optional[Calibration] = None
 
 
-def load_calibration(path: str) -> None:
+def load_calibration(path: str | None = None) -> bool:
     """Load a calibration file produced by mapping.py.
 
     Once loaded, every call to get_xyz_coords will automatically transform
     camera-frame coordinates into robot-base coordinates before returning.
+
+    If *path* is None or the file does not exist, prints a single warning
+    and leaves the system in raw-camera-coords mode. Returns True if a
+    calibration was loaded, False otherwise.
     """
     global _calibration
+    if path is None:
+        print(
+            "[tools] No calibration path provided - using raw camera coordinates."
+        )
+        return False
+    if not Path(path).is_file():
+        print(
+            f"[tools] No calibration found at {path} - using raw camera coordinates."
+        )
+        return False
     _calibration = Calibration.load(path)
     print(
         f"[tools] Loaded calibration from {path}  "
         f"(RMS: {_calibration.rms_error * 1000:.1f} mm)"
     )
+    return True
 
 
 def build_tools(webcam_res=(1920, 1080), depth_res=(1280, 720)):
@@ -52,20 +69,25 @@ def build_tools(webcam_res=(1920, 1080), depth_res=(1280, 720)):
             "function": {
                 "name": "get_xyz_coords",
                 "description": (
-                    f"Convert pixel [u, v] coordinates (from a {depth_res[0]}x{depth_res[1]} scale) into XYZ meters."
-                    "Uses standard image pixels where [0, 0] is the top left"
+                    "Convert object locations into XYZ meters. "
+                    "Pass the object's pixel coordinates as NORMALIZED FLOATS in the range [0, 1], "
+                    f"where [0, 0] is the top-left of the {depth_res[0]}x{depth_res[1]} depth frame "
+                    "and [1, 1] is the bottom-right. "
+                    "Example: [0.5, 0.5] is the exact center of the frame. "
+                    "The returned coordinates are in the depth-camera frame by default; "
+                    "if a calibration has been loaded, they are transformed into the robot-base frame. "
                     "If a point returns 'invalid' (status: invalid), do not retry the same pixel. "
-                    "Instead, pick a new pixel 5-10 units away to bypass depth sensor noise."
+                    "Instead, pick a new location 5-10% of the frame away to bypass depth sensor noise."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "coords": {
                             "type": "array",
-                            "description": f"List of [x, y] pixel coordinates based on {depth_res[0]}x{depth_res[1]} resolution.",
+                            "description": "List of [x, y] NORMALIZED coordinates (floats in [0, 1]).",
                             "items": {
                                 "type": "array",
-                                "items": {"type": "integer"},
+                                "items": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                                 "minItems": 2,
                                 "maxItems": 2,
                             },
@@ -215,18 +237,38 @@ def dispatch(
         )
 
     elif tool_name == "get_xyz_coords":
-        coords = tool_args.get("coords", [])
+        raw_coords = tool_args.get("coords", [])
         if depthcam.last_depth_rs is None:
             return "ERROR: No saved depth frame. Call get_depth_frames first.", None
 
+        # Clamp into [0, 1] floats; guards against the LLM returning integers.
+        norm_coords: list[list[float]] = []
+        for c in raw_coords:
+            try:
+                nx = max(0.0, min(1.0, float(c[0])))
+                ny = max(0.0, min(1.0, float(c[1])))
+                norm_coords.append([nx, ny])
+            except (TypeError, ValueError, IndexError):
+                continue
+
         if hasattr(depthcam, "last_rgb"):
             debug_img = depthcam.last_rgb.copy()
-            for u, v in coords:
+            rgb_h, rgb_w = debug_img.shape[:2]
+            for nx, ny in norm_coords:
+                u = int(round(nx * (rgb_w - 1)))
+                v = int(round(ny * (rgb_h - 1)))
                 cv2.drawMarker(debug_img, (u, v), (0, 0, 255), cv2.MARKER_CROSS, 20, 2)
             cv2.imwrite("last_ai_aim.jpg", debug_img)
             print("[DEBUG] Saved AI target visualization to last_ai_aim.jpg")
 
-        xyz = get_xyz_coords(depthcam, coords, depthcam.last_depth_rs)
+        depth_h = depthcam.last_depth_rs.get_height()
+        depth_w = depthcam.last_depth_rs.get_width()
+        pixel_coords = [
+            [int(round(nx * (depth_w - 1))), int(round(ny * (depth_h - 1)))]
+            for nx, ny in norm_coords
+        ]
+
+        xyz = get_xyz_coords(depthcam, pixel_coords, depthcam.last_depth_rs)
 
         # Transform camera → robot if calibration is loaded
         if _calibration is not None:
@@ -236,11 +278,11 @@ def dispatch(
 
         # Tell the agent explicitly which coords failed — don't silently return nan
         results = []
-        for (u, v), pt in zip(coords, points):
-            if any(np.isnan(v) for v in pt):
-                results.append({"pixel": [u, v], "status": "invalid", "xyz": None})
+        for (nx, ny), pt in zip(norm_coords, points):
+            if any(v is not None and math.isnan(v) for v in pt):
+                results.append({"norm": [nx, ny], "status": "invalid", "xyz": None})
             else:
-                results.append({"pixel": [u, v], "status": "ok", "xyz": pt})
+                results.append({"norm": [nx, ny], "status": "ok", "xyz": pt})
 
         return json.dumps({"units": "meters", "points": results}), None
 
