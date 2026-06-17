@@ -405,16 +405,21 @@ def validate_correspondences(
             suspects.append((idx, score, err))
 
     # 4. Cross-pose rvec consistency (no-rotation gripper: rvec should be
-    # near-constant across all poses; > 2° deviation flags occlusion)
-    if rvecs is not None and len(rvecs) == len(camera_pts):
+    # near-constant across all poses; threshold = median_dev + 5*1.4826*MAD,
+    # which adapts to the rig's natural arm-compliance drift instead of
+    # using a fixed angle)
+    if rvecs is not None and len(rvecs) == len(camera_pts) and len(rvecs) >= 3:
         median_rvec = np.median(rvecs, axis=0)
         dev_deg = np.linalg.norm(rvecs - median_rvec, axis=1) * (180.0 / np.pi)
+        median_dev = float(np.median(dev_deg))
+        mad = float(np.median(np.abs(dev_deg - median_dev)))
+        threshold = median_dev + 5.0 * 1.4826 * mad
         print(f"\n  Per-pose rvec deviation from median (deg):")
         for i, d in enumerate(dev_deg):
-            flag = " ⚠" if d > 2.0 else ""
+            flag = " ⚠" if d > threshold else ""
             print(f"     Pose {i + 1}:  {d:.2f}°{flag}")
         for i, d in enumerate(dev_deg):
-            if d > 2.0:
+            if d > threshold:
                 loo_err_mm = loo_err_by_idx.get(i, 0.0)
                 suspects.append((i, 1, loo_err_mm))
 
@@ -934,14 +939,21 @@ def run_interactive_calibration(
             f"all poses should agree):"
         )
         rvec_outliers: list[int] = []
-        if len(rv) > 0:
+        if len(rv) >= 3:
             median_rv = np.median(rv, axis=0)
             dev_deg = np.linalg.norm(rv - median_rv, axis=1) * (180.0 / np.pi)
+            median_dev = float(np.median(dev_deg))
+            mad = float(np.median(np.abs(dev_deg - median_dev)))
+            threshold = median_dev + 5.0 * 1.4826 * mad
             for k, d in enumerate(dev_deg):
-                flag = " ⚠" if d > 2.0 else ""
+                flag = " ⚠" if d > threshold else ""
                 print(f"     Pose {k + 1}:  {d:.2f}°{flag}")
-                if d > 2.0:
+                if d > threshold:
                     rvec_outliers.append(k)
+            print(
+                f"  (rvec threshold: median {median_dev:.2f}° + "
+                f"5×1.4826×MAD {mad:.2f}° = {threshold:.2f}°)"
+            )
         validate_correspondences(ca, ro, rvecs=rv)
 
         if rvec_outliers:
